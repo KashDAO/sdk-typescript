@@ -1,0 +1,75 @@
+name: Bug report
+description: Something is wrong with `@kashdao/sdk`
+labels: [bug, triage]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: SDK version
+      description: Output of `npm ls @kashdao/sdk` or the value in your `package.json`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Node.js 22
+        - Node.js 24
+        - Bun
+        - Deno
+        - Browser (Chrome / Firefox / Safari)
+        - Cloudflare Workers
+        - Vercel Edge
+        - Other (please describe in reproduction)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        A clear description of the bug. **Include the `requestId`** from the
+        error if you have one — it lets us pull server logs in seconds.
+      placeholder: |
+        I called `kash.trades.create({...})` with a valid market id, but it
+        threw `KashServerError`. requestId: 01HQGY8K2N3X4Z5C6D7E8F9G0H
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: |
+        Smallest piece of code that demonstrates the bug. If it depends on
+        a specific market, include the market id.
+      render: typescript
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment details
+      description: |
+        Any other relevant context: OS, deployment platform (Vercel/Railway/
+        AWS Lambda/etc), proxy or VPN in front of the SDK, etc.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Final checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: This isn't a security vulnerability — those should go to security@kash.bot per [SECURITY.md](../SECURITY.md).
+          required: true

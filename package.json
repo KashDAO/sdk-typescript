@@ -1,0 +1,97 @@
+{
+  "name": "@kashdao/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for the Kash public API. Native fetch, zero runtime deps beyond Zod, ESM + CJS.",
+  "license": "MIT",
+  "author": {
+    "name": "KashDAO",
+    "email": "engineering@kash.bot",
+    "url": "https://kash.bot"
+  },
+  "homepage": "https://github.com/KashDAO/sdk-typescript#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KashDAO/sdk-typescript.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KashDAO/sdk-typescript/issues"
+  },
+  "keywords": [
+    "api-client",
+    "kash",
+    "kashdao",
+    "prediction-markets",
+    "sdk"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/testing/index.d.cts",
+        "default": "./dist/testing/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo coverage docs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "docs": "typedoc",
+    "sbom": "npm sbom --sbom-format=cyclonedx > sbom.cyclonedx.json",
+    "pack": "pnpm build && pnpm pack"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.1.4",
+    "@types/node": "^25.0.3",
+    "@vitest/coverage-v8": "^4.0.16",
+    "size-limit": "^11.1.4",
+    "tsup": "^8.5.1",
+    "typedoc": "^0.28.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16",
+    "eslint": "^9.18.0",
+    "typescript-eslint": "^8.21.0",
+    "@eslint/js": "^9.18.0"
+  }
+}

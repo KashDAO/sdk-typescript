@@ -1,0 +1,26 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "out": "docs",
+  "name": "@kashdao/sdk",
+  "readme": "README.md",
+  "tsconfig": "tsconfig.json",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeProtected": false,
+  "excludeReferences": false,
+  "navigationLinks": {
+    "Changelog": "https://github.com/KashDAO/sdk-typescript/blob/main/CHANGELOG.md",
+    "GitHub": "https://github.com/KashDAO/sdk-typescript",
+    "npm": "https://www.npmjs.com/package/@kashdao/sdk"
+  },
+  "categorizeByGroup": false,
+  "githubPages": true,
+  "hideGenerator": false,
+  "searchInComments": true,
+  "validation": {
+    "invalidLink": true,
+    "notExported": false,
+    "notDocumented": false
+  }
+}

@@ -1,0 +1,12 @@
+name = "kash-sdk-starter"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Bind your secrets:
+#   wrangler secret put KASH_API_KEY
+#   wrangler secret put KASH_WEBHOOK_SECRET
+#
+# For local dev, use a `.dev.vars` file (gitignored):
+#   KASH_API_KEY=kash_test_…
+#   KASH_WEBHOOK_SECRET=whsec_…

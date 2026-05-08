@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/KashDAO/sdk-typescript/blob/main/SECURITY.md
+    about: Please report security issues privately. See SECURITY.md for the disclosure flow.
+  - name: Question or general discussion
+    url: https://github.com/KashDAO/sdk-typescript/discussions
+    about: For "how do I..." questions and design discussions, please use Discussions.
+  - name: Kash platform / API issues
+    url: https://app.kash.bot
+    about: Server-side bugs (wrong response, downtime, account issues) — please use the in-app support channel, not the SDK repo.

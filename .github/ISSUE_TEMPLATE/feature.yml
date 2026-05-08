@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a new method, config option, or capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Start with the use case, not the API. We pick the API.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API (optional)
+      description: |
+        If you have an API shape in mind, sketch it. If not, describe the
+        outcome and we'll design.
+      render: typescript
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds you've tried, similar features in other SDKs, etc.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Final checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: This is in scope for the SDK (transport-layer concerns, resource clients, ergonomic helpers) — not a feature request for the Kash backend itself.
+          required: true
