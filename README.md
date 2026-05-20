@@ -1,6 +1,6 @@
 # `@kashdao/sdk`
 
-Official TypeScript client for the [Kash](https://kash.bot) public API.
+Official TypeScript SDK for the [Kash](https://kash.bot) public API.
 
 [![npm version](https://img.shields.io/npm/v/@kashdao/sdk.svg)](https://www.npmjs.com/package/@kashdao/sdk)
 [![bundle size](https://img.shields.io/badge/gzipped-≤24KB-blue)](#bundle-size)
@@ -25,7 +25,7 @@ Official TypeScript client for the [Kash](https://kash.bot) public API.
 - [Which package do I need?](#which-package-do-i-need) — `@kashdao/sdk` vs `@kashdao/protocol-sdk`
 - [API keys](#api-keys) — scopes, limits, allowlists, rotation
 - [Test mode vs live mode](#test-mode-vs-live-mode)
-- [Quick start](#quick-start)
+- [Quickstart](#quickstart)
 - [Configuration](#configuration)
 - [API versioning](#api-versioning) — pinning behaviour to a specific dated server release
 - [Resources](#resources)
@@ -129,7 +129,7 @@ console.log(markets.data[0]?.title);
 ```
 
 If that prints a market title, you're connected. Continue to
-[Quick start](#quick-start) for the full trade lifecycle.
+[Quickstart](#quickstart) for the full trade lifecycle.
 
 ---
 
@@ -217,6 +217,20 @@ orchestration layer is yours, not Kash's.)
 cleanly. A common pattern is using `@kashdao/sdk` for fast public
 reads (markets list, quotes) and `@kashdao/protocol-sdk` for the
 actual on-chain trade signing.
+
+### Prefer the terminal?
+
+If you want a one-binary entry point that wraps both packages above
+behind a single `kash …` command — with multi-profile auth, JSON
+output for AI agents, shell completion, and `kash protocol …` for
+the on-chain path — see [`@kashdao/cli`](https://www.npmjs.com/package/@kashdao/cli).
+
+### Python integrator?
+
+The on-chain protocol SDK ships a Python sibling at
+[`kashdao-protocol-sdk`](https://pypi.org/project/kashdao-protocol-sdk/) —
+the canonical Hummingbot integration path. Cross-language parity is
+validated by byte-equal test fixtures.
 
 ---
 
@@ -402,7 +416,7 @@ not as a stand-in for a local Kash environment that doesn't exist.
 
 ---
 
-## Quick start
+## Quickstart
 
 ```ts
 import { KashClient } from '@kashdao/sdk';
