@@ -168,10 +168,13 @@ Kash ships **two independent SDKs** for two different audiences. They
 have no shared package boundary — install whichever fits your use case
 (or both, if you need both).
 
-> **Both Kash SDKs are non-custodial.** User funds always sit in
-> Privy-managed MPC smart accounts that the user controls — Kash never
-> holds keys or funds on either path. The split below is about _who
-> orchestrates execution_ (Kash backend vs. you), not custody.
+> **Every Kash SDK and the public API are non-custodial.** User funds
+> always sit in Privy-managed MPC smart accounts that the user
+> controls — Kash never holds keys, never custodies funds, never moves
+> value, and is not a money-services business. The split below is
+> about _who orchestrates execution_ (Kash backend vs. you), not
+> custody. See [SECURITY.md](./SECURITY.md) § Non-custodial design
+> for the full statement.
 
 ### This package — `@kashdao/sdk` (Kash-orchestrated, API-wrapping)
 
@@ -183,18 +186,20 @@ const trade = await kash.trades.create({...});
 ```
 
 - **What it wraps**: the Kash public REST API (`api.kash.bot/v1/*`).
-- **Auth**: Kash API key (`kash_live_…` / `kash_test_…`) — a scoped
-  delegation against the user's Privy smart account, revocable at any
-  time. Kash never sees the keys; Privy MPC keeps custody with the user.
-- **Trade flow**: you call the API; Kash's backend builds the userop;
-  the user's Privy-managed smart account signs it; Kash sponsors gas
-  and routes through the standard pipeline (risk engine, executor,
-  indexer, webhooks).
+- **Auth**: Kash API key (`kash_live_…` / `kash_test_…`) — a scoped,
+  revocable delegation the user issues against their own Privy-managed
+  smart account. Kash never sees signing keys; Privy MPC keeps them
+  with the user.
+- **Custody**: every state-changing on-chain action is signed by the
+  user's smart account inside Privy MPC. Kash never holds funds,
+  never moves funds, and never signs anything. See
+  [SECURITY.md § Non-custodial design](./SECURITY.md#non-custodial-design)
+  for the full statement.
 - **Dependencies**: just [Zod](https://zod.dev). No viem, no bundler
   client, no chain RPC required.
 - **Best for**: trading bots, dashboards, fintech integrations,
-  anywhere you want Kash to orchestrate execution on top of the
-  user's smart account without running your own signer/RPC/bundler.
+  anywhere you want a single REST surface over the user's smart
+  account without running your own signer/RPC/bundler.
 
 ### Sibling package — [`@kashdao/protocol-sdk`](https://www.npmjs.com/package/@kashdao/protocol-sdk) (self-orchestrated, on-chain)
 
