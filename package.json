@@ -1,7 +1,7 @@
 {
   "name": "@kashdao/sdk",
   "version": "0.1.0",
-  "description": "Official TypeScript SDK for the Kash public API. Native fetch, zero runtime deps beyond Zod, ESM + CJS.",
+  "description": "Official non-custodial TypeScript SDK for the Kash public API. Native fetch, zero runtime deps beyond Zod, ESM + CJS.",
   "license": "MIT",
   "author": {
     "name": "KashDAO",
