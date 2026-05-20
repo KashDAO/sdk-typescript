@@ -1505,7 +1505,6 @@ After 1.0:
 | **Bug reports**              | [GitHub issues](https://github.com/KashDAO/sdk-typescript/issues) — please include the SDK version, runtime, and `requestId` from the failing call |
 | **Feature requests**         | [GitHub discussions](https://github.com/KashDAO/sdk-typescript/discussions)                                                                        |
 | **Security vulnerabilities** | `security@kash.bot` — see [SECURITY.md](./SECURITY.md). **Do NOT file public issues.**                                                             |
-| **API status**               | [https://status.kash.bot](https://status.kash.bot)                                                                                                 |
 | **Examples**                 | [`examples/`](./examples) — runnable end-to-end scripts + framework [`starters/`](./examples/starters) (Next.js, Express, Cloudflare)              |
 
 When you file a bug, the most useful piece of context is the `requestId`
