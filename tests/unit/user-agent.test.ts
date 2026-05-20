@@ -1,8 +1,20 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { KashClient, SDK_VERSION, USER_AGENT } from '../../src/index.js';
 
 import { META } from './_test-utils.js';
+
+// Resolve packages/sdk/package.json relative to this test file so the
+// drift check works regardless of cwd (Vitest worker pool varies).
+const PACKAGE_JSON_PATH = fileURLToPath(new URL('../../package.json', import.meta.url));
+const PACKAGE_JSON_VERSION = (
+  JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf8')) as {
+    version: string;
+  }
+).version;
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -17,10 +29,14 @@ describe('User-Agent', () => {
     expect(USER_AGENT).toMatch(/\)$/);
   });
 
-  it('SDK_VERSION matches the package.json version', async () => {
-    // Sourced from version.ts; this guard fails CI if a release bumps
-    // package.json without updating the constant.
-    expect(SDK_VERSION).toBe('0.1.0');
+  it('SDK_VERSION matches the package.json version', () => {
+    // SDK_VERSION lives in src/internal/version.ts (hardcoded — see the
+    // docstring there for why we can't import package.json directly at
+    // runtime). This guard reads package.json AT TEST TIME and asserts
+    // the two match, so a release that bumps package.json without
+    // updating the constant (or vice versa) fails CI before the User-
+    // Agent header drifts from the published version.
+    expect(SDK_VERSION).toBe(PACKAGE_JSON_VERSION);
   });
 
   it('sends User-Agent on every request', async () => {

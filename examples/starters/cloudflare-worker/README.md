@@ -6,12 +6,12 @@ runs unmodified.
 
 ## What it shows
 
-| Concern | Pattern |
-|---|---|
+| Concern                         | Pattern                                                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Authenticated reads at the edge | `GET /markets`, `GET /markets/:id` — low-latency from any region; `KASH_API_KEY` lives in Cloudflare secrets and never reaches the browser |
-| Webhook verification | `POST /webhooks/kash` using `kash.webhooks.verifySignature` (Web Crypto, portable) |
-| Health probe | `GET /health` |
-| Edge-friendly errors | `KashError.isKashError` translates SDK errors to JSON responses |
+| Webhook verification            | `POST /webhooks/kash` using `kash.webhooks.verifySignature` (Web Crypto, portable)                                                         |
+| Health probe                    | `GET /health`                                                                                                                              |
+| Edge-friendly errors            | `KashError.isKashError` translates SDK errors to JSON responses                                                                            |
 
 Authenticated mutations (`POST /trades`, etc.) are intentionally
 **not** exposed here — Workers are typically the public-facing edge.

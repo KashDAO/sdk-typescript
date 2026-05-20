@@ -3,11 +3,11 @@
 Each subdirectory is a runnable example wiring `@kashdao/sdk` into a
 specific framework or runtime. Pick the one that matches your stack:
 
-| Starter | Framework | Use case |
-|---|---|---|
+| Starter                                     | Framework               | Use case                                                                                                |
+| ------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
 | [`nextjs-app-router/`](./nextjs-app-router) | Next.js 15 (App Router) | Full-stack web app — server components for authenticated reads, server actions for authenticated trades |
-| [`express/`](./express) | Node + Express | Backend API service — webhooks, server-to-server integration |
-| [`cloudflare-worker/`](./cloudflare-worker) | Cloudflare Workers | Edge runtime — rate-limited proxy or webhook receiver at the edge |
+| [`express/`](./express)                     | Node + Express          | Backend API service — webhooks, server-to-server integration                                            |
+| [`cloudflare-worker/`](./cloudflare-worker) | Cloudflare Workers      | Edge runtime — rate-limited proxy or webhook receiver at the edge                                       |
 
 ## How to run any of them
 

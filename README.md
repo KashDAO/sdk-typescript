@@ -40,7 +40,7 @@ Official TypeScript client for the [Kash](https://kash.bot) public API.
 - [Polling](#polling)
 - [Errors](#errors)
 - [Idempotency](#idempotency)
-- [Rate limits & retries](#rate-limits--retries)
+- [Rate limits & retries](#rate-limits-retries)
 - [Timeouts and aborts](#timeouts-and-aborts)
 - [Observability](#observability)
 - [Webhook signature verification](#webhook-signature-verification)
@@ -51,7 +51,7 @@ Official TypeScript client for the [Kash](https://kash.bot) public API.
 - [Compatibility](#compatibility)
 - [Bundle size](#bundle-size)
 - [Versioning](#versioning)
-- [Support & community](#support--community)
+- [Support & community](#support-community)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -168,7 +168,12 @@ Kash ships **two independent SDKs** for two different audiences. They
 have no shared package boundary — install whichever fits your use case
 (or both, if you need both).
 
-### This package — `@kashdao/sdk` (custodial, API-wrapping)
+> **Both Kash SDKs are non-custodial.** User funds always sit in
+> Privy-managed MPC smart accounts that the user controls — Kash never
+> holds keys or funds on either path. The split below is about _who
+> orchestrates execution_ (Kash backend vs. you), not custody.
+
+### This package — `@kashdao/sdk` (Kash-orchestrated, API-wrapping)
 
 ```ts
 import { KashClient } from '@kashdao/sdk';
@@ -178,22 +183,27 @@ const trade = await kash.trades.create({...});
 ```
 
 - **What it wraps**: the Kash public REST API (`api.kash.bot/v1/*`).
-- **Auth**: Kash API key (`kash_live_…` / `kash_test_…`).
-- **Trade flow**: you call the API, Kash's backend signs with the user's
-  Privy-managed smart account, the trade flows through the standard
-  Kash pipeline (risk engine, executor, indexer, webhooks).
+- **Auth**: Kash API key (`kash_live_…` / `kash_test_…`) — a scoped
+  delegation against the user's Privy smart account, revocable at any
+  time. Kash never sees the keys; Privy MPC keeps custody with the user.
+- **Trade flow**: you call the API; Kash's backend builds the userop;
+  the user's Privy-managed smart account signs it; Kash sponsors gas
+  and routes through the standard pipeline (risk engine, executor,
+  indexer, webhooks).
 - **Dependencies**: just [Zod](https://zod.dev). No viem, no bundler
   client, no chain RPC required.
 - **Best for**: trading bots, dashboards, fintech integrations,
-  anywhere you want Kash to handle wallet management and execution.
+  anywhere you want Kash to orchestrate execution on top of the
+  user's smart account without running your own signer/RPC/bundler.
 
-### Sibling package — [`@kashdao/protocol-sdk`](https://www.npmjs.com/package/@kashdao/protocol-sdk) (non-custodial, on-chain)
+### Sibling package — [`@kashdao/protocol-sdk`](https://www.npmjs.com/package/@kashdao/protocol-sdk) (self-orchestrated, on-chain)
 
 A standalone package for talking directly to the Kash protocol contracts
 without going through the Kash API. Brings your own signer (HSM,
 Fireblocks, web3signer, viem account, browser wallet), your own RPC,
-your own bundler. **Zero custody by Kash** — keys never leave your
-infra, transactions never touch Kash servers.
+your own bundler. Transactions never touch Kash servers. (Same
+non-custodial model as the wrapper above; the difference is the
+orchestration layer is yours, not Kash's.)
 
 - Install separately: `npm install @kashdao/protocol-sdk viem`.
 - Best for: market makers, AI-agent runners, self-custody UIs, anyone
@@ -522,7 +532,7 @@ logger.info(`kash sdk@${SDK_VERSION} api=${SDK_API_VERSION}`);
 
 To pick up newer server-side behaviour:
 
-1. Read the **server changelog** at [docs.kash.bot/api/changelog](https://docs.kash.bot/api/changelog) — every dated version is listed with the breaking changes it introduces.
+1. Read the **API version policy** at [docs.kash.bot/developer-docs/rest-api/overview](https://docs.kash.bot/developer-docs/rest-api/overview#api-version) — every dated version's lifecycle (Sunset / Deprecation headers) is documented there.
 2. Upgrade `@kashdao/sdk` (which bumps `SDK_API_VERSION` and runs the contract tests against the new version). Set `apiVersion: 'YYYY-MM-DD'` to declare the version your client is built against.
 
 **Server behaviour:** the public API reads the `X-Kash-Api-Version`

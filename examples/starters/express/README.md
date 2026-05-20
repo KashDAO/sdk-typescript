@@ -7,14 +7,14 @@ own clients call.
 
 ## What it shows
 
-| Concern | Pattern |
-|---|---|
-| Authenticated reads | `GET /markets`, `GET /markets/:id` — proxied with the server-side `KashClient`; the API key never leaves your origin |
-| Authenticated trade | `POST /trades` — uses server-side `KashClient`; forwards `Idempotency-Key` from the caller |
-| High-value confirmation | `isAwaitingConfirmation(trade)` returns `202` with the token |
-| Webhook receiver | `POST /webhooks/kash` — `express.raw()` for signature verification on the original bytes |
-| Health probe | `GET /health` — wraps `kash.healthCheck()` |
-| Error mapping | Centralised handler turns `KashError` subclasses into structured HTTP responses |
+| Concern                 | Pattern                                                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Authenticated reads     | `GET /markets`, `GET /markets/:id` — proxied with the server-side `KashClient`; the API key never leaves your origin |
+| Authenticated trade     | `POST /trades` — uses server-side `KashClient`; forwards `Idempotency-Key` from the caller                           |
+| High-value confirmation | `isAwaitingConfirmation(trade)` returns `202` with the token                                                         |
+| Webhook receiver        | `POST /webhooks/kash` — `express.raw()` for signature verification on the original bytes                             |
+| Health probe            | `GET /health` — wraps `kash.healthCheck()`                                                                           |
+| Error mapping           | Centralised handler turns `KashError` subclasses into structured HTTP responses                                      |
 
 ## Run
 

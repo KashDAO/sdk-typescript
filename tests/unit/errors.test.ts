@@ -346,4 +346,51 @@ describe('classifyHttpError', () => {
     const err = classifyHttpError({ status: 400, problem: {} });
     expect(err.isRetryable).toBe(false);
   });
+
+  // -------------------------------------------------------------------
+  // hint propagation — the SDK appends client-side hints to error
+  // messages when it can diagnose the failure better than the server.
+  // The flagship case is the kash_live/kash_test ↔ baseUrl mismatch:
+  // both round-trip to the server as a generic 401, but the SDK has
+  // the key prefix AND the configured URL in hand, so it can append
+  // "your kash_live_* key is being sent to a staging URL" without
+  // any server change.
+  //
+  // A regression that drops the hint or shows the wrong one tanks the
+  // diagnostic value of the auto-suggestion at the customer's worst
+  // moment (when they're already debugging a 401).
+  // -------------------------------------------------------------------
+  describe('hint propagation', () => {
+    it('appends "(Hint: …)" to the error message when hint is provided', () => {
+      const err = classifyHttpError({
+        status: 401,
+        problem: { code: 'API_KEY_INVALID', detail: 'Invalid or revoked API key' },
+        hint: 'your `kash_live_*` key is being sent to a staging URL',
+      });
+      // The hint format is `(Hint: …)` appended after the base detail.
+      // Locking the literal so a future formatter change is intentional.
+      expect(err.message).toContain('Invalid or revoked API key');
+      expect(err.message).toContain('(Hint: your `kash_live_*` key');
+    });
+
+    it('omits the (Hint: …) suffix when no hint is provided', () => {
+      const err = classifyHttpError({
+        status: 401,
+        problem: { code: 'API_KEY_INVALID', detail: 'Invalid or revoked API key' },
+      });
+      expect(err.message).toBe('Invalid or revoked API key');
+      expect(err.message).not.toContain('Hint:');
+    });
+
+    it('hint appends even when problem.detail is absent (falls back to title or "HTTP <status>")', () => {
+      // Without `detail` the baseDetail comes from problem.title or
+      // `HTTP <status>` — the hint must still append cleanly.
+      const err = classifyHttpError({
+        status: 401,
+        problem: { code: 'API_KEY_INVALID' },
+        hint: 'baseUrl/key mismatch',
+      });
+      expect(err.message).toContain('(Hint: baseUrl/key mismatch)');
+    });
+  });
 });

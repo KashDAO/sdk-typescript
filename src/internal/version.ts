@@ -36,7 +36,7 @@ export const SDK_VERSION = '0.1.0';
  * release cadence or for testing newer server-side behaviour without
  * a SDK upgrade.
  */
-export const SDK_API_VERSION = '2026-05-02';
+export const SDK_API_VERSION = '2026-04-29';
 
 /**
  * The runtime tag added to the `User-Agent`. Best-effort detection;

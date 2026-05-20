@@ -613,4 +613,280 @@ describe('KashHttpClient.request', () => {
     expect(result).toEqual({ ok: true });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
+
+  // -------------------------------------------------------------------
+  // Malformed / non-RFC-7807 error bodies — the SDK must classify the
+  // failure based on status alone when the body is unparseable. Upstream
+  // proxies (Cloudflare, ALB) return HTML 502/504 pages on overload;
+  // misconfigured services return application/json with non-object
+  // bodies. Either case must produce a typed KashError, never crash.
+  // -------------------------------------------------------------------
+
+  describe('malformed error responses fall through to status-based classification', () => {
+    it('502 with HTML body + text/html content-type → KashServerError', async () => {
+      // Cloudflare overload page. JSON.parse would throw on the body;
+      // the try/catch in classifyResponse swallows it and falls through
+      // with `problem = {}`. The 502 status alone is enough to classify.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('<html><body>502 Bad Gateway</body></html>', {
+            status: 502,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      await expect(
+        client.request({ path: '/x', method: 'GET', schema: responseSchema })
+      ).rejects.toBeInstanceOf(KashServerError);
+    });
+
+    it('500 with empty body + no content-type → KashServerError', async () => {
+      // Some load balancers drop content-type on premature connection
+      // resets. classifyResponse skips the JSON parse path entirely
+      // when content-type is absent, lands in classifyHttpError with
+      // empty problem, 500 → KashServerError.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('', {
+            status: 500,
+            // Note: NOT setting content-type at all.
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      await expect(
+        client.request({ path: '/x', method: 'GET', schema: responseSchema })
+      ).rejects.toBeInstanceOf(KashServerError);
+    });
+
+    it('503 with malformed JSON body + application/json content-type → KashServerError', async () => {
+      // The JSON.parse throws inside classifyResponse — the catch
+      // swallows and falls through with problem={}. Status-based
+      // classification still works.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('{ not valid json', {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      await expect(
+        client.request({ path: '/x', method: 'POST', schema: responseSchema, body: {} })
+      ).rejects.toBeInstanceOf(KashServerError);
+    });
+
+    it('404 with JSON null body → KashError (no crash on null.code access)', async () => {
+      // A body of literal `null` parses as JSON.parse('null') === null.
+      // The classifyResponse check `if (body && typeof body === 'object')`
+      // rejects null (`null && ...` is null/falsy), so problem stays `{}`.
+      // Status 404 classifies via empty problem.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('null', {
+            status: 404,
+            headers: { 'content-type': 'application/json' },
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      // Whatever it is, it should be a typed KashError — not a
+      // TypeError from "Cannot read properties of null".
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).constructor.name).toMatch(/^Kash/);
+    });
+
+    it('429 with JSON string body (not object) → KashRateLimitError with Retry-After', async () => {
+      // Some bots return JSON.stringify("rate limit hit") which parses
+      // to a primitive string. classifyResponse rejects non-objects,
+      // so problem={} — but Retry-After header still flows through and
+      // the 429 status classifies correctly.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('"too many requests"', {
+            status: 429,
+            headers: { 'content-type': 'application/json', 'retry-after': '30' },
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashRateLimitError);
+      expect((err as KashRateLimitError).retryAfterSeconds).toBe(30);
+    });
+
+    it('200 with non-JSON content-type but JSON-shaped body → KashValidationError', async () => {
+      // The success path is strict: a 200 must come back with a
+      // JSON-family content-type. text/plain on success is a contract
+      // break (the server has to opt out of JSON deliberately), and
+      // the SDK refuses to silently coerce — surfaces as a typed
+      // validation error so consumers can distinguish "server is
+      // serving the wrong content-type" from a transient 5xx.
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response('{"ok":true}', {
+            status: 200,
+            headers: { 'content-type': 'text/plain' },
+          })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, { maxRetries: 0 });
+      await expect(
+        client.request({ path: '/x', method: 'GET', schema: responseSchema })
+      ).rejects.toBeInstanceOf(KashValidationError);
+    });
+
+    it('5xx HTML response does not crash retry path', async () => {
+      // The retry decision must read err.isRetryable from the typed
+      // error. If the classifier produced a generic Error instead of
+      // a KashServerError on the HTML body, isRetryable would be
+      // undefined and the retry loop would skip a legitimate retry.
+      const htmlFetch = vi.fn(
+        async () =>
+          new Response('<html>503</html>', {
+            status: 503,
+            headers: { 'content-type': 'text/html' },
+          })
+      );
+      const client = makeClient(htmlFetch as typeof fetch, { maxRetries: 2 });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashServerError);
+      // 3 calls = original + 2 retries — proves the retry classifier
+      // saw isRetryable: true on the HTML 503.
+      expect(htmlFetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Cross-mode hint — the SDK auto-appends a diagnostic when it can
+  // detect a key↔baseUrl mismatch on a 401. Both kash_live/staging and
+  // kash_test/production cases must produce the right hint; custom
+  // baseUrls and non-401 failures must NOT receive a hint.
+  //
+  // This is the end-to-end path: real fetch → response.json() →
+  // classifyResponse → crossModeHint → KashAuthenticationError.message.
+  // -------------------------------------------------------------------
+  describe('cross-mode hint on 401 (key prefix vs baseUrl)', () => {
+    // The canonical URLs the SDK matches against — kept verbatim so a
+    // future move to a different production/staging hostname forces an
+    // intentional update here.
+    const PRODUCTION_URL = 'https://api.kash.bot/v1';
+    const STAGING_URL = 'https://api-staging.kash.bot/v1';
+    const LIVE_KEY = 'kash_live_AAAaaaBBBbbbCCCcccDDDdddEEEeeeFF';
+    const TEST_KEY = 'kash_test_abcabcabcabcabcabcabcabcabcabcab';
+
+    it('kash_live_* key against staging URL → live→staging hint', async () => {
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 'API_KEY_INVALID', detail: 'Invalid or revoked API key' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: LIVE_KEY,
+        baseUrl: STAGING_URL,
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashAuthenticationError);
+      expect((err as KashAuthenticationError).message).toContain('kash_live_*');
+      expect((err as KashAuthenticationError).message).toContain('staging');
+    });
+
+    it('kash_test_* key against production URL → test→production hint', async () => {
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 'API_KEY_INVALID', detail: 'Invalid or revoked API key' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: TEST_KEY,
+        baseUrl: PRODUCTION_URL,
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashAuthenticationError);
+      expect((err as KashAuthenticationError).message).toContain('kash_test_*');
+      expect((err as KashAuthenticationError).message).toContain('production');
+    });
+
+    it('matching key+URL → no hint appended', async () => {
+      // Defensive: the hint must NOT fire when the pairing is correct.
+      // Otherwise a legitimate 401 (revoked key, expired key) carries
+      // a misleading "you're hitting the wrong env" note.
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 'API_KEY_REVOKED', detail: 'Key revoked at 2026-04-30' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: LIVE_KEY,
+        baseUrl: PRODUCTION_URL,
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashAuthenticationError);
+      expect((err as KashAuthenticationError).message).not.toContain('Hint:');
+    });
+
+    it('custom baseUrl (private mirror / localhost) → no hint, even on mismatch', async () => {
+      // The SDK can't know what audience a custom URL serves — it
+      // intentionally skips the hint rather than guessing. Documented
+      // in the crossModeHint() comment.
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 'API_KEY_INVALID', detail: 'Invalid key' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: LIVE_KEY,
+        baseUrl: 'https://my-private-mirror.example.com/v1',
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashAuthenticationError);
+      expect((err as KashAuthenticationError).message).not.toContain('Hint:');
+    });
+
+    it('non-401 status → no hint, even with mismatched config', async () => {
+      // The hint is 401-only. A 500 / 503 / 429 with the SAME mismatch
+      // must NOT carry the hint — those failures have nothing to do
+      // with key→URL routing.
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(503, { code: 'DEPENDENCY_UNAVAILABLE', detail: 'Backend down' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: LIVE_KEY,
+        baseUrl: STAGING_URL,
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      // It's a 503, not a 401 — even though the live/staging mismatch
+      // is real, the hint stays silent.
+      expect((err as Error).message).not.toContain('Hint:');
+    });
+
+    it('401 with non-API_KEY_* code (e.g. WAF-injected) → no hint', async () => {
+      // crossModeHint() only fires when problem.code is absent or
+      // starts with API_KEY_. A 401 with code="WAF_BLOCKED" (or any
+      // non-API_KEY_ code) doesn't get the hint — the cause isn't a
+      // key↔URL mismatch.
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 'WAF_BLOCKED', detail: 'Blocked at the edge' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: LIVE_KEY,
+        baseUrl: STAGING_URL,
+        maxRetries: 0,
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect((err as Error).message).not.toContain('Hint:');
+    });
+  });
 });

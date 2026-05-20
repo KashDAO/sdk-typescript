@@ -83,6 +83,24 @@ export const TradeFailedPayloadSchema = tradeWebhookCommonSchema.extend({
 
 export type TradeFailedPayload = z.infer<typeof TradeFailedPayloadSchema>;
 
+/**
+ * `trade.rejected` — risk engine declined the trade pre-execution.
+ *
+ * Distinct from `trade.failed` (which covers on-chain/RPC failures
+ * after submission). Rejection happens BEFORE the trade was ever
+ * submitted on-chain, so there is no `txHash`. Customers can branch
+ * on `status` to render rejection-specific UX. Shape mirrors
+ * `trade.failed` deliberately so `errorCode` / `errorMessage`
+ * rendering can be shared.
+ */
+export const TradeRejectedPayloadSchema = tradeWebhookCommonSchema.extend({
+  status: z.literal('rejected'),
+  errorCode: z.string().min(1),
+  errorMessage: z.string().min(1),
+});
+
+export type TradeRejectedPayload = z.infer<typeof TradeRejectedPayloadSchema>;
+
 // -----------------------------------------------------------------
 // Outer envelope — every customer-facing webhook body has this shape.
 // -----------------------------------------------------------------
@@ -116,6 +134,13 @@ export const WebhookEventSchema = z.discriminatedUnion('type', [
     apiVersion: z.string(),
     createdAt: z.string().datetime(),
     data: TradeFailedPayloadSchema,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    type: z.literal('trade.rejected'),
+    apiVersion: z.string(),
+    createdAt: z.string().datetime(),
+    data: TradeRejectedPayloadSchema,
   }),
 ]);
 

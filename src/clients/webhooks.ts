@@ -233,23 +233,37 @@ export class WebhooksClient {
       };
     }
 
-    if (!parsed.v1) {
+    if (parsed.v1Values.length === 0) {
       return { valid: false, reason: 'Signature header missing the v1 scheme value.' };
     }
 
     const expectedHex = await hmacSha256Hex(secret, `${parsed.timestampMs}.${body}`);
-    // Length pre-check before the constant-time compare. In principle
-    // this leaks length information; in practice the expected hex is
-    // ALWAYS 64 chars (HMAC-SHA-256 → 32 bytes → 64 hex), so the only
-    // signal here is "the attacker sent a non-SHA-256-shaped value",
-    // which they already know they did. The early return saves a
-    // 64-char loop on obviously malformed input. Don't remove without
-    // moving to a fixed-length compare path.
-    if (expectedHex.length !== parsed.v1.length) {
+    // The worker may emit multiple `v1=` entries during the secret
+    // rotation overlap window (one for the current secret, one for the
+    // previous — see `signWebhookPayloadDual` in @kashdao/webhook-delivery).
+    // The verifier accepts if ANY of them matches the customer's secret.
+    // Without this loop, a customer who has already pulled the rotated
+    // secret would fail verification on every webhook during the 7-day
+    // rotation window because the parser previously kept only the last
+    // v1= value (which is the previous-secret entry by emit order).
+    //
+    // Each comparison is constant-time within itself; the overall loop
+    // length is at most 2 and is a function of the header content, not
+    // the secret — no timing-leak surface.
+    let anyMatched = false;
+    let anyLengthMatched = false;
+    for (const v1 of parsed.v1Values) {
+      if (v1.length !== expectedHex.length) continue;
+      anyLengthMatched = true;
+      if (constantTimeEqualHex(expectedHex, v1)) {
+        anyMatched = true;
+        break;
+      }
+    }
+    if (!anyLengthMatched) {
       return { valid: false, reason: 'Signature length mismatch.' };
     }
-
-    if (!constantTimeEqualHex(expectedHex, parsed.v1)) {
+    if (!anyMatched) {
       return { valid: false, reason: 'Signature does not match the expected HMAC.' };
     }
     return { valid: true };
@@ -334,7 +348,12 @@ export class WebhooksClient {
 
 type ParsedHeader = {
   readonly timestampMs: number;
-  readonly v1: string | undefined;
+  /**
+   * Every `v1=` entry found in the header, in order. The worker emits
+   * two during the 7-day secret rotation overlap window — verifier
+   * accepts if any matches the customer's secret.
+   */
+  readonly v1Values: readonly string[];
 };
 
 function parseSignatureHeader(header: string): ParsedHeader | null {
@@ -343,7 +362,7 @@ function parseSignatureHeader(header: string): ParsedHeader | null {
     .map((s) => s.trim())
     .filter(Boolean);
   let timestampMs: number | null = null;
-  let v1: string | undefined;
+  const v1Values: string[] = [];
   for (const segment of segments) {
     const eq = segment.indexOf('=');
     if (eq <= 0 || eq === segment.length - 1) continue;
@@ -353,11 +372,14 @@ function parseSignatureHeader(header: string): ParsedHeader | null {
       const parsed = Number.parseInt(value, 10);
       if (Number.isFinite(parsed)) timestampMs = parsed;
     } else if (key === 'v1') {
-      v1 = value;
+      // Collect every v1= entry. The worker emits two during the
+      // 7-day secret rotation overlap (current + previous); the
+      // verifier must accept ANY that matches the customer's secret.
+      v1Values.push(value);
     }
   }
   if (timestampMs === null) return null;
-  return { timestampMs, v1 };
+  return { timestampMs, v1Values };
 }
 
 async function hmacSha256Hex(secret: string, payload: string): Promise<string> {

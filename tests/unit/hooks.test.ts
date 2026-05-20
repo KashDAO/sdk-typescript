@@ -90,7 +90,10 @@ describe('lifecycle hooks', () => {
     expect(reqEvents[0]!.attempt).toBe(1);
 
     expect(resEvents).toHaveLength(1);
-    expect(resEvents[0]!.status).toBe(200);
+    // POST /v1/trades returns 201 Created; the success-path hook fires with
+    // the actual response.status (previously hardcoded to 200 — fixed when
+    // attempt() started returning the real status).
+    expect(resEvents[0]!.status).toBe(201);
     expect(resEvents[0]!.durationMs).toBeGreaterThanOrEqual(0);
   });
 

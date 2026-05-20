@@ -234,9 +234,9 @@ export class KashHttpClient {
           opts,
           url,
           attempt,
-          200,
+          result.status,
           startedAt,
-          undefined,
+          result.requestId,
           result.rateLimit,
           result.apiVersion,
           result.idempotentReplay,
@@ -416,6 +416,8 @@ export class KashHttpClient {
     callerSignal: AbortSignal | undefined
   ): Promise<{
     data: T;
+    status: number;
+    requestId: string | undefined;
     rateLimit: RateLimitState | null;
     apiVersion: string | undefined;
     idempotentReplay: boolean;
@@ -473,8 +475,10 @@ export class KashHttpClient {
 
     const rateLimit = parseRateLimitHeaders(response);
     const apiVersion = response.headers.get('x-api-version') ?? undefined;
+    const requestId = response.headers.get('x-request-id') ?? undefined;
     const idempotentReplay = parseIdempotentReplayHeader(response);
     const deprecation = parseDeprecationHeaders(response);
+    const status = response.status;
 
     // 204 No Content / empty body — schemas can opt in via z.void()
     // or z.undefined(). Skip the JSON parse to avoid a SyntaxError.
@@ -486,7 +490,15 @@ export class KashHttpClient {
           { code: 'SDK_VALIDATION', statusCode: 204 }
         );
       }
-      return { data: parsed.data, rateLimit, apiVersion, idempotentReplay, deprecation };
+      return {
+        data: parsed.data,
+        status,
+        requestId,
+        rateLimit,
+        apiVersion,
+        idempotentReplay,
+        deprecation,
+      };
     }
 
     const contentType = response.headers.get('content-type') ?? '';
@@ -515,7 +527,15 @@ export class KashHttpClient {
         statusCode: response.status,
       });
     }
-    return { data: parsed.data, rateLimit, apiVersion, idempotentReplay, deprecation };
+    return {
+      data: parsed.data,
+      status,
+      requestId,
+      rateLimit,
+      apiVersion,
+      idempotentReplay,
+      deprecation,
+    };
   }
 
   private async classifyResponse(response: Response): Promise<KashError> {
