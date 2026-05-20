@@ -267,8 +267,10 @@ export type {
   VerifySignatureResult,
 } from './clients/webhooks.js';
 
-// Non-custodial / direct-mode is intentionally NOT re-exported here.
-// It lives in its own package: `@kashdao/protocol-sdk`. Consumers who
-// need self-custody trade flow install that package directly. Keeping
-// the two SDKs separate avoids dragging viem (a peer dep of
-// protocol-sdk) into the dependency tree of API-only consumers.
+// Self-orchestrated / direct-to-chain mode is intentionally NOT
+// re-exported here. It lives in its own package: `@kashdao/protocol-sdk`.
+// Both packages are non-custodial — user funds always live in
+// Privy-managed MPC smart accounts the user controls; Kash never holds
+// keys. The packages are split because the protocol-sdk path requires
+// viem + an RPC + a signer, and API-only consumers shouldn't pay that
+// dependency cost.
