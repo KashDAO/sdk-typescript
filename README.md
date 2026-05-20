@@ -61,20 +61,28 @@ Official TypeScript SDK for the [Kash](https://kash.bot) public API.
 
 A first trade in five steps. Total time: about 5 minutes.
 
+> 🧪 **Staging release.** Production endpoints (`api.kash.bot`) and the
+> self-service key-issuance dashboard are not yet live. Today only
+> `kash_test_*` keys work — the SDK auto-routes them to staging
+> (`api-staging.kash.bot`). To request a key, email
+> [`engineering@kash.bot`](mailto:engineering@kash.bot) with your
+> intended use case. Self-service issuance, `kash_live_*` keys, and the
+> production API all land with the v1.0 launch.
+
 ### 1. Create a Kash account
 
 Sign up at **[https://app.kash.bot](https://app.kash.bot)**. The app walks
 you through wallet provisioning — a Privy-managed smart account is created
 automatically; you don't need to bring your own wallet.
 
-> 🧪 **Just want to play?** Skip ahead to [Test mode](#test-mode-vs-live-mode)
-> — you can use the SDK end-to-end against the staging environment with
-> simulated funds before connecting a real account.
+### 2. Request an API key
 
-### 2. Generate an API key
-
-In the Kash app, go to **Settings → API Keys → Create API Key**. You'll be
-asked for:
+Email [`engineering@kash.bot`](mailto:engineering@kash.bot) with your
+intended use case to request a `kash_test_*` staging key. Operators
+will issue the key (scoped, with the limits below) and reply with the
+plaintext secret out-of-band. When self-service issuance ships at
+v1.0 this step moves to **Settings → API Keys → Create API Key** in
+the app. The key shape:
 
 | Field            | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
@@ -241,7 +249,9 @@ validated by byte-equal test fixtures.
 
 ## API keys
 
-API keys are managed in the Kash app under **Settings → API Keys**.
+API keys are issued by emailing `engineering@kash.bot` (during the
+staging release; self-service issuance under **Settings → API Keys**
+ships at v1.0).
 
 ### Scopes
 
@@ -299,8 +309,12 @@ deliveries are signed with the new secret immediately upon rotation.
 
 ### Revocation
 
-In the app: **Settings → API Keys → … → Revoke**. Effective immediately.
-Subsequent requests return `401 API_KEY_REVOKED` (`KashAuthenticationError`).
+During the staging release, email `engineering@kash.bot` with the
+key prefix (`kash_test_XXXXXX…`) to request revocation; operators
+revoke effective immediately. After v1.0, self-service revocation
+lands under **Settings → API Keys → … → Revoke**. Either way,
+subsequent requests return `401 API_KEY_REVOKED`
+(`KashAuthenticationError`).
 
 ---
 
@@ -1146,7 +1160,7 @@ Three usual causes:
 1. **Mode mismatch.** A `kash_test_…` key sent to `https://api.kash.bot/v1`
    (live URL) is rejected, and vice versa. Check the table in
    [Test mode vs live mode](#test-mode-vs-live-mode).
-2. **The key was revoked.** Check in the Kash app under Settings → API Keys.
+2. **The key was revoked.** Email `engineering@kash.bot` with the key prefix to confirm (or, after v1.0, check **Settings → API Keys**).
 3. **The env var isn't loaded.** `console.log(process.env.KASH_API_KEY?.slice(0, 10))`
    should print `kash_live_` or `kash_test_` — if it prints `undefined`,
    your dotenv loader isn't running.
@@ -1465,7 +1479,9 @@ on the Kash platform but are **not** wrapped by this SDK release. They're
 either accessible via the API directly or planned for a future version:
 
 - **API key self-service** (`auth:manage` scope) — issue/list/revoke keys
-  programmatically. Use the app's Settings → API Keys for now.
+  programmatically. During the staging release, email
+  `engineering@kash.bot` for issuance/revocation; self-service ships
+  at v1.0.
 - **Streaming / WebSocket subscriptions** — the API doesn't expose a
   streaming endpoint yet. For now, poll with `waitForCompletion()` for
   trade status and consume webhook deliveries for events.
@@ -1520,7 +1536,7 @@ After 1.0:
 
 | Need                         | Where to go                                                                                                                                        |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sign up / get a key**      | [https://app.kash.bot](https://app.kash.bot) → Settings → API Keys                                                                                 |
+| **Request a staging key**    | Email [`engineering@kash.bot`](mailto:engineering@kash.bot) with your use case — self-service issuance ships at v1.0                               |
 | **Bug reports**              | [GitHub issues](https://github.com/KashDAO/sdk-typescript/issues) — please include the SDK version, runtime, and `requestId` from the failing call |
 | **Feature requests**         | [GitHub discussions](https://github.com/KashDAO/sdk-typescript/discussions)                                                                        |
 | **Security vulnerabilities** | `security@kash.bot` — see [SECURITY.md](./SECURITY.md). **Do NOT file public issues.**                                                             |

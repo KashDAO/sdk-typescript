@@ -34,8 +34,8 @@ Each starter follows the right pattern:
   predictions, quotes, trades, portfolio, webhooks). Never ship the key
   to the browser; proxy via a server route, server action, or worker.
 - **Browser-safe reads** (anonymous market browsing, embedded market
-  cards) belong on the **webapp's** `app.kash.bot/api` surface, not on
-  this SDK.
+  cards) belong on a server-rendered surface that proxies the SDK, not
+  on this SDK directly.
 - **Authenticated mutations + webhooks** (trades, portfolio, webhook
   signature verification) run server-side only:
   - In Next.js: behind a **server action** or **route handler**.
