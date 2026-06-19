@@ -10,6 +10,17 @@ breaking changes are explicitly called out in the entry.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-06-18
+
+### Changed
+
+- **Mainnet GA.** The production API (`api.kash.bot`) is live and
+  `kash_live_*` keys are issued self-service under **Settings → API
+  Keys** in the app. Documentation refreshed accordingly — removed the
+  "staging release / email for a key / ships at v1.0" framing. No
+  runtime change: the SDK already defaults to production and auto-routes
+  `kash_live_*` → production, `kash_test_*` → staging by key prefix.
+
 ## [0.1.0] — 2026-05-20
 
 Initial public release.

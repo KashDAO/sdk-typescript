@@ -10,6 +10,7 @@ import {
   KashClient,
   KashConfigurationError,
   KashConflictError,
+  KashNotFoundError,
   KashRateLimitError,
   KashServerError,
   KashTimeoutError,
@@ -40,6 +41,9 @@ try {
   } else if (err instanceof KashConflictError) {
     // IDEMPOTENCY_KEY_CONFLICT, MARKET_NOT_TRADEABLE, INSUFFICIENT_BALANCE …
     console.error(`Conflict (${err.code}):`, err.message);
+  } else if (err instanceof KashNotFoundError) {
+    // MARKET_NOT_FOUND, TRADE_NOT_FOUND, WEBHOOK_EVENT_NOT_FOUND …
+    console.error(`Not found (${err.code}):`, err.message);
   } else if (err instanceof KashValidationError) {
     console.error('Bad request:', err.message);
   } else if (err instanceof KashAuthenticationError) {
