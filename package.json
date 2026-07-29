@@ -75,7 +75,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "docs": "typedoc",
-    "sbom": "npm sbom --sbom-format=cyclonedx > sbom.cyclonedx.json",
+    "sbom": "bash scripts/generate-sbom.sh",
     "pack": "pnpm build && pnpm pack"
   },
   "dependencies": {
