@@ -34,6 +34,10 @@ export const MarketResourceSchema = z.object({
   imageUrl: z.string().nullable(),
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime().nullable(),
+  // Optional, not merely nullable: an API deployment older than the field
+  // omits the key entirely. Requiring it would make every market fetch throw
+  // KashValidationError against any environment that has not deployed it yet.
+  freezeAt: z.string().datetime().nullable().optional(),
   resolvedAt: z.string().datetime().nullable(),
 });
 

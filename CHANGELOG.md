@@ -10,6 +10,21 @@ breaking changes are explicitly called out in the entry.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-07-29
+
+### Added
+
+- **`freezeAt` on the market resource.** `MarketResource` now carries
+  `freezeAt`, the moment trading closes on a market. It is distinct from
+  `expiresAt`, which is the on-chain resolve time — for a typical market
+  `freezeAt` is 300 seconds earlier. Consumers that need the real
+  last-tradable instant should read `freezeAt` and stop deriving it.
+
+  The field is **optional**, not merely nullable: an API deployment that
+  predates it omits the key entirely, so a client on this version keeps
+  working against an older environment and simply sees `undefined`.
+  Non-breaking — no action required.
+
 ## [0.1.1] — 2026-06-18
 
 ### Changed

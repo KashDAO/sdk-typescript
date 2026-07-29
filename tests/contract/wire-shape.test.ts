@@ -92,6 +92,7 @@ export const FIXTURE_MARKET = {
   imageUrl: null,
   createdAt: '2026-04-30T12:00:00.000Z',
   expiresAt: '2026-05-30T12:00:00.000Z',
+  freezeAt: '2026-05-30T11:55:00.000Z',
   resolvedAt: null,
 };
 

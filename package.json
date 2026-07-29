@@ -1,6 +1,6 @@
 {
   "name": "@kashdao/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Official non-custodial TypeScript SDK for the Kash public API. Native fetch, zero runtime deps beyond Zod, ESM + CJS.",
   "license": "MIT",
   "author": {

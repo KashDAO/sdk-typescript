@@ -44,6 +44,7 @@ export const DEFAULT_MARKET: MarketResource = {
   imageUrl: null,
   createdAt: ISO_FIXED,
   expiresAt: '2026-12-31T23:59:59.000Z',
+  freezeAt: '2026-12-31T23:54:59.000Z',
   resolvedAt: null,
 };
 
