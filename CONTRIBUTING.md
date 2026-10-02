@@ -43,7 +43,8 @@ Requires Node 22+ and pnpm 9+.
 - Better JSDoc and README clarifications.
 - Test coverage for edge cases (timezones, malformed servers, runtime
   differences).
-- Performance optimisations that keep the bundle under 24 KB gzipped.
+- Performance optimisations that keep every entry within its
+  [bundle-size](#bundle-size) cap.
 
 🟡 Discuss first (open an issue):
 
@@ -94,11 +95,10 @@ contract test, and the bundle-size gate locally before merging your
 PR. We may add CI in a future release; for now the workflow is human-
 checked.
 
-The bundle-size cap is **≤ 24 KB gzipped ESM**. Run the check yourself:
+Run the bundle-size gate yourself (see [Bundle size](#bundle-size)):
 
 ```sh
-pnpm build && gzip -9 -c dist/index.js | wc -c
-# expect ≤ 24576
+pnpm build && pnpm size
 ```
 
 > 💡 **Note on the contract test split**: this repo runs
@@ -124,15 +124,22 @@ test: cover the early-break async iterator path
 
 ## Bundle size
 
-The SDK targets **≤ 24 KB gzipped ESM**. CI fails PRs that push the bundle
-over the cap. If your change pushes it over, justify it in the PR description
-or find offsetting savings elsewhere.
+[`size-limit`](https://github.com/ai/size-limit) is the bundle gate. Each
+public entry has its own cap in `package.json#size-limit`, measured the way
+a consumer's bundler ships it — minified, then brotli-compressed, with `zod`
+excluded as an external:
 
-The cap was raised once (22 KB → 24 KB in CHANGELOG) to accommodate
-RFC 7807 extension parsing and SDK↔API alignment work; further raises
-should be deliberate and justified in CHANGELOG. When bundle headroom
-drops below ~500 bytes, prefer trimming over a cap raise unless the
-addition is a documented alignment fix.
+| Entry                  | Cap   |
+| ---------------------- | ----- |
+| `@kashdao/sdk`         | 24 KB |
+| `@kashdao/sdk/testing` | 8 KB  |
+
+`pnpm size` fails when an entry exceeds its cap, and the release script
+(`scripts/publish.sh`) refuses to publish until it passes. If your change
+pushes an entry over, justify it in the PR description or find offsetting
+savings elsewhere. Cap raises should be deliberate and justified in
+CHANGELOG; prefer trimming over a raise unless the addition is a documented
+SDK↔API alignment fix.
 
 ## Questions
 

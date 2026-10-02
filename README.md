@@ -3,7 +3,7 @@
 Official TypeScript SDK for the [Kash](https://kash.bot) public API.
 
 [![npm version](https://img.shields.io/npm/v/@kashdao/sdk.svg)](https://www.npmjs.com/package/@kashdao/sdk)
-[![bundle size](https://img.shields.io/badge/gzipped-≤24KB-blue)](#bundle-size)
+[![bundle size](https://img.shields.io/badge/min%2Bbrotli-≤24KB-blue)](#bundle-size)
 [![types](https://img.shields.io/npm/types/@kashdao/sdk.svg)](https://www.npmjs.com/package/@kashdao/sdk)
 [![license](https://img.shields.io/npm/l/@kashdao/sdk.svg)](./LICENSE)
 [![Node 22+](https://img.shields.io/node/v/@kashdao/sdk.svg)](https://nodejs.org)
@@ -678,6 +678,12 @@ const trades = await kash.trades.list({ status: 'pending,completed', limit: 50 }
 const done = await kash.trades.waitForCompletion(id);
 ```
 
+**Solana trades.** `trade.txHash` is `null` for every Solana trade, even once
+`completed`: the trade resource publishes EVM hashes only. The
+`trade.completed` webhook carries the real base58 signature. `trade.chainRef`
+(`"solana:mainnet-beta"`, `"evm:8453"`) names the chain, on API version
+`2026-08-19` and later.
+
 #### Metadata
 
 Every `kash.trades.create()` call accepts an optional `metadata` map —
@@ -756,6 +762,10 @@ trade status — the `else` chain above never falls through.
 const summary = await kash.portfolio.get();
 const positions = await kash.portfolio.positions({ marketId });
 ```
+
+`summary.smartAccountAddress` is the address holding your funds. For a user
+whose funds live on Solana it is a **base58 Solana wallet address**, not a
+`0x` smart account, so treat it as an opaque chain address.
 
 ### Webhooks
 
@@ -953,6 +963,25 @@ Replays of the same idempotent request return the original response with
 IDEMPOTENCY_KEY_CONFLICT` (or `409 CLIENT_REQUEST_ID_CONFLICT`). The SDK
 does **not** auto-retry these — they signal a logical conflict the caller
 must resolve.
+
+### POSTs are auto-keyed
+
+If you supply neither, the SDK generates an `Idempotency-Key` for every POST
+itself, once per call, and sends the same one on every retry of that call.
+
+This is not a convenience — it is what makes the SDK's own retries safe. A
+connection reset or timeout is **not** evidence the server did nothing: it can
+drop the response to a trade that was already created, and an unkeyed retry
+would then place a second real trade. Two separate `create()` calls always get
+two distinct keys, so auto-keying never collapses two intended trades into one.
+
+Supply your own key when you want idempotency to span more than one SDK call —
+a retry after a process restart, or a job that may run twice. The SDK never
+overwrites a key you passed.
+
+In the rare runtime with no `crypto` at all, no key can be generated; the SDK
+then sends the POST **once** and surfaces the error rather than repeating an
+unprotected write.
 
 ## Rate limits & retries
 
@@ -1501,13 +1530,16 @@ The SDK uses native `fetch`, `URL`, `AbortController`, `crypto.subtle`, and
 
 ## Bundle size
 
-| Format            | Minified | Gzipped |
-| ----------------- | -------- | ------- |
-| ESM (`index.js`)  | ~82 KB   | ~22 KB  |
-| CJS (`index.cjs`) | ~86 KB   | ~23 KB  |
+Every release is gated by [`size-limit`](https://github.com/ai/size-limit),
+which measures each entry the way your bundler ships it — minified, then
+brotli-compressed:
 
-Bundle size is gated in CI at **≤ 24 KB gzipped ESM**. Verify locally
-with `pnpm build && gzip -c dist/index.js | wc -c`.
+| Entry                  | Cap   |
+| ---------------------- | ----- |
+| `@kashdao/sdk`         | 24 KB |
+| `@kashdao/sdk/testing` | 8 KB  |
+
+Verify locally with `pnpm build && pnpm size`.
 
 Zod is the only runtime dependency; it is **not** bundled (it's a peer
 dependency-style external).

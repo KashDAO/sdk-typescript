@@ -22,6 +22,7 @@ import {
   type PendingTrade,
   type RejectedTrade,
   type TerminalTrade,
+  TradeStatusSchema,
 } from '../../src/index.js';
 import type { TradeResource, TradeStatus } from '../../src/index.js';
 
@@ -139,22 +140,46 @@ describe('isAwaitingConfirmation', () => {
 });
 
 describe('exhaustiveness', () => {
+  /*
+   * DERIVED from the enum, not hand-listed.
+   *
+   * This matrix is the ONLY thing asserting that `isAwaitingConfirmation` /
+   * `isPendingTrade` / `isTerminalTrade` partition the status space, and it
+   * used to iterate its own copy of the seven statuses. A copy cannot see a
+   * status it does not contain: measured by adding `'cancelling'` to BOTH
+   * `tradeResourceSchema.status` and `TradeStatusSchema` — the shape a real
+   * API release takes — all 42 files and 610 tests passed while
+   * `guardsMatching` was **0** for the new status. The API/SDK parity test
+   * cannot catch it either; it passes precisely because both sides agree.
+   *
+   * Reading `TradeStatusSchema.options` makes the next added status fail HERE,
+   * which is the point: the guards do not partition by construction, and they
+   * must not. `isPendingTrade` deliberately excludes `pending_confirmation`,
+   * so "pending" is not the complement of "terminal" — a new status has to be
+   * classified by a human, and this is what stops it being classified by
+   * silence.
+   */
+  const ALL_STATUSES: readonly TradeStatus[] = TradeStatusSchema.options;
+
+  it('sanity floor: the enum still declares the seven known statuses', () => {
+    // Anti-vacuity. An empty or truncated `.options` would make the matrix
+    // below pass by iterating nothing.
+    expect(ALL_STATUSES.length).toBeGreaterThanOrEqual(7);
+  });
+
   it('every TradeStatus is covered by exactly one of the four mutually-exclusive guards', () => {
-    const allStatuses: TradeStatus[] = [
-      'pending_confirmation',
-      'pending',
-      'validating',
-      'executing',
-      'completed',
-      'failed',
-      'rejected',
-    ];
-    for (const status of allStatuses) {
+    for (const status of ALL_STATUSES) {
       const t = tradeWith(status);
       const matches = [isAwaitingConfirmation(t), isPendingTrade(t), isTerminalTrade(t)].filter(
         Boolean
       ).length;
-      expect(matches, `status=${status}`).toBe(1);
+      expect(
+        matches,
+        `Trade status "${status}" is matched by ${matches} of the three top-level guards, not 1. ` +
+          `Every status must be classified by exactly one of isAwaitingConfirmation / ` +
+          `isPendingTrade / isTerminalTrade — a consumer's if/else-if chain over them ` +
+          `silently drops any status none of them claims.`
+      ).toBe(1);
     }
   });
 });

@@ -23,6 +23,8 @@
  * ```
  */
 
+import { TERMINAL_TRADE_STATUSES } from './schemas/trade.js';
+
 import type { TradeResource, TradeStatus } from './schemas/trade.js';
 
 // ---- Trade status guards ------------------------------------------------
@@ -59,7 +61,23 @@ export type AwaitingConfirmationTrade = TradeResource & {
 /** Narrowed `TradeResource` whose `status` is in the pending set (in-flight). */
 export type PendingTrade = TradeResource & { readonly status: PendingTradeStatus };
 
-const TERMINAL_SET: ReadonlySet<TradeStatus> = new Set(['completed', 'failed', 'rejected']);
+/*
+ * DERIVED from `TERMINAL_TRADE_STATUSES`, not a second hand-written copy.
+ *
+ * `isTerminalTrade` and `waitForCompletion` are both public surface and both
+ * answer "has this trade stopped moving?", so they must not be able to
+ * disagree — `trades.waitForCompletion` polls until the status is in
+ * `TERMINAL_TRADE_STATUSES`, and a consumer's `isTerminalTrade(trade)` branch
+ * is how they act on the result.
+ *
+ * The exported list keeps its wide `readonly TradeStatus[]` annotation
+ * deliberately. Narrowing it to a tuple would let `TerminalTradeStatus` be
+ * derived too, but it would also narrow the parameter of the
+ * `TERMINAL_TRADE_STATUSES.includes(...)` calls that `clients/trades.ts` and
+ * published consumer code make — a breaking type change to a customer-facing
+ * export, in exchange for removing one three-word type alias. Not worth it.
+ */
+const TERMINAL_SET: ReadonlySet<TradeStatus> = new Set(TERMINAL_TRADE_STATUSES);
 const PENDING_SET: ReadonlySet<TradeStatus> = new Set(['pending', 'validating', 'executing']);
 
 /**

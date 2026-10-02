@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { KashClient } from '../../src/index.js';
+import { QuoteMarketSummarySchema } from '../../src/schemas/quote.js';
 
 import { META } from './_test-utils.js';
 
@@ -127,5 +128,58 @@ describe('QuotesClient', () => {
         amountUsdcAtomic: '100000000',
       })
     ).rejects.toThrow(/buy.*sell/);
+  });
+});
+
+/*
+ * Chain identity on the 0.1.x line — `chainId` stays required, `chainRef` is
+ * an optional addition.
+ *
+ * Asserted against the SCHEMA directly rather than through a mocked transport,
+ * because what changed is what the wire shape is allowed to be, and a transport
+ * test would pass just as well against a schema that accepted anything.
+ */
+describe('QuoteMarketSummarySchema: chain identity across both API versions', () => {
+  const base = {
+    id: '11111111-1111-1111-1111-111111111111',
+    contractAddress: '0x1111111111111111111111111111111111111111',
+    outcomes: [{ index: 0, label: 'Yes', probability: 0.5 }],
+    status: 'ACTIVE' as const,
+  };
+
+  it('accepts the EVM shape unchanged — chainId present, no chainRef', () => {
+    const r = QuoteMarketSummarySchema.safeParse({ ...base, chainId: 8453 });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.chainId).toBe(8453);
+  });
+
+  it('accepts an EVM quote that ALSO carries chainRef (the newer API version)', () => {
+    const r = QuoteMarketSummarySchema.safeParse({
+      ...base,
+      chainId: 8453,
+      chainRef: 'evm:8453',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.chainRef).toBe('evm:8453');
+  });
+
+  it('keeps chainId REQUIRED, as 0.1.3 typed it: a quote without one is refused', () => {
+    // The pinned 2026-04-29 refuses non-EVM quotes with CHAIN_NOT_SUPPORTED,
+    // so this shape only reaches 0.2.0, which pins 2026-08-19.
+    const r = QuoteMarketSummarySchema.safeParse({
+      ...base,
+      contractAddress: 'So11111111111111111111111111111111111111112',
+      chainRef: 'solana:devnet',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('refuses a surrogate chain id', () => {
+    /*
+     * The runtime guard added after 0.1.3: a surrogate id is refused even
+     * though it is a positive integer.
+     */
+    const r = QuoteMarketSummarySchema.safeParse({ ...base, chainId: 9000002 });
+    expect(r.success).toBe(false);
   });
 });

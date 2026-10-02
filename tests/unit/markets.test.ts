@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { KashClient } from '../../src/index.js';
+import { KashClient, MarketResourceSchema } from '../../src/index.js';
 
 import { META } from './_test-utils.js';
 
@@ -198,5 +198,67 @@ describe('MarketsClient', () => {
       ids.push(p.id);
     }
     expect(ids).toEqual(['p1', 'p2']);
+  });
+});
+
+describe('MarketResourceSchema chain identity on the 0.1.x line', () => {
+  /**
+   * WHY THIS BLOCK EXISTS, and why widening was compulsory rather than a
+   * nicety. `GET /v1/markets` was LEAKING the surrogate chain id — measured
+   * against deployed staging 2026-09-12, `chainId: 9000002` on 11 of 50 markets
+   * on the first page. The shipped 0.1.3 tolerated that only by accident: its
+   * tree carried a bare `z.number().int().positive()`, because `_chain.ts` did
+   * not exist yet. Shipping `publicChainIdSchema` here against that leak would
+   * have made `markets.list()` throw on any page containing a Solana market —
+   * i.e. the fleet would have gone from "skips Solana" to "cannot list markets
+   * at all". The API was fixed first and this widened with it.
+   */
+  const base = {
+    id: '11111111-1111-1111-1111-111111111111',
+    contractAddress: '0x1111111111111111111111111111111111111111',
+    title: 'a market',
+    description: null,
+    status: 'ACTIVE' as const,
+    outcomeCount: 2,
+    outcomes: [
+      { index: 0, label: 'Yes', probability: 0.5 },
+      { index: 1, label: 'No', probability: 0.5 },
+    ],
+    imageUrl: null,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    expiresAt: null,
+    resolvedAt: null,
+  };
+
+  it('CONTROL: an EVM market with chainId and no chainRef still parses', () => {
+    // Without this, every assertion below would pass against a schema that had
+    // been broken in some unrelated way.
+    expect(MarketResourceSchema.safeParse({ ...base, chainId: 8453 }).success).toBe(true);
+  });
+
+  it('keeps chainId REQUIRED, as 0.1.3 typed it: a market without one is refused', () => {
+    // 0.1.x is a patch line, so the type cannot loosen. The API version it pins
+    // (2026-04-29) never serves a market without a chainId; the 2026-08-19
+    // shape below is accepted from 0.2.0, which pins that version.
+    const r = MarketResourceSchema.safeParse({
+      ...base,
+      contractAddress: 'zLoacSmkK6kAF4XQkNNgLdXYUZTXQ3KKhQuc9z4HP9Q',
+      chainRef: 'solana:devnet',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('accepts an EVM market carrying BOTH, which 2026-08-19 returns', () => {
+    expect(
+      MarketResourceSchema.safeParse({ ...base, chainId: 84532, chainRef: 'evm:84532' }).success
+    ).toBe(true);
+  });
+
+  it('refuses a surrogate chain id', () => {
+    /*
+     * The runtime guard added after 0.1.3: a surrogate id is refused even
+     * though it is a positive integer.
+     */
+    expect(MarketResourceSchema.safeParse({ ...base, chainId: 9000002 }).success).toBe(false);
   });
 });

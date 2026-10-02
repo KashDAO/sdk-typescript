@@ -42,7 +42,7 @@ function makeKash(fetchImpl: typeof fetch, maxRetries = 0): KashClient {
 }
 
 describe('TradesClient', () => {
-  it('create — sends body, X-API-Key, Content-Type, no idempotency by default', async () => {
+  it('create — sends body, X-API-Key, Content-Type, and an auto Idempotency-Key', async () => {
     const fetchSpy = vi.fn(async () =>
       jsonResponse(
         {
@@ -66,8 +66,141 @@ describe('TradesClient', () => {
     expect(trade.confirmation).toBeUndefined();
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(init.method).toBe('POST');
-    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBeUndefined();
+    // This assertion used to require the header be ABSENT, which pinned the
+    // defect: the SDK retries a POST on transport errors, so an unkeyed
+    // create could place a second real trade. An unkeyed POST is now
+    // auto-keyed — see `autoIdempotencyKey` in internal/http.ts.
+    const autoKey = (init.headers as Record<string, string>)['Idempotency-Key'];
+    expect(autoKey).toBeTypeOf('string');
+    expect(autoKey).toMatch(/^[A-Za-z0-9_\-:.]+$/);
     expect(init.body).toContain('"marketId":');
+  });
+
+  it('create — every attempt of one call carries the SAME auto key', async () => {
+    // The whole point of generating it outside the retry loop. A fresh key per
+    // attempt would defeat server-side dedup and duplicate the trade anyway.
+    let n = 0;
+    const fetchSpy = vi.fn(async () => {
+      n += 1;
+      if (n < 3) throw new TypeError('fetch failed');
+      return jsonResponse(
+        {
+          trade: TRADE_BASE,
+          data: TRADE_BASE,
+          _meta: { requestId: 'r1', timestamp: '2026-04-30T12:00:00.000Z', idempotent: false },
+        },
+        { status: 201 }
+      );
+    });
+    const kash = makeKash(fetchSpy as typeof fetch, 2);
+    await kash.trades.create({
+      marketId: TRADE_BASE.marketId,
+      outcomeIndex: 0,
+      amount: '100',
+      side: 'buy',
+    });
+    expect(fetchSpy.mock.calls.length).toBe(3);
+    const keys = fetchSpy.mock.calls.map(
+      (c) => ((c[1] as RequestInit).headers as Record<string, string>)['Idempotency-Key']
+    );
+    expect(keys[0]).toBeTypeOf('string');
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it('create — two separate calls get DIFFERENT auto keys', async () => {
+    // A shared key across logical calls would make the second trade a replay
+    // of the first: the customer asks for two trades and gets one.
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(
+        {
+          trade: TRADE_BASE,
+          data: TRADE_BASE,
+          _meta: { requestId: 'r1', timestamp: '2026-04-30T12:00:00.000Z', idempotent: false },
+        },
+        { status: 201 }
+      )
+    );
+    const kash = makeKash(fetchSpy as typeof fetch);
+    const body = {
+      marketId: TRADE_BASE.marketId,
+      outcomeIndex: 0,
+      amount: '100',
+      side: 'buy',
+    } as const;
+    await kash.trades.create({ ...body });
+    await kash.trades.create({ ...body });
+    const keys = fetchSpy.mock.calls.map(
+      (c) => ((c[1] as RequestInit).headers as Record<string, string>)['Idempotency-Key']
+    );
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it('create — a POST that cannot be keyed is NOT retried', async () => {
+    // The fail-closed half of `autoIdempotencyKey`. With no randomness source
+    // there is no key, and repeating an unkeyed write is how a transport error
+    // becomes a second real trade. Failing the call is recoverable; that is not.
+    const realCrypto = globalThis.crypto;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).crypto;
+    try {
+      const fetchSpy = vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      });
+      const kash = makeKash(fetchSpy as unknown as typeof fetch, 3);
+      await expect(
+        kash.trades.create({
+          marketId: TRADE_BASE.marketId,
+          outcomeIndex: 0,
+          amount: '100',
+          side: 'buy',
+        })
+      ).rejects.toThrow();
+      expect(fetchSpy.mock.calls.length).toBe(1);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).crypto = realCrypto;
+    }
+  });
+
+  it('create — a GET is unaffected: no auto key, retries still apply', async () => {
+    // The auto-key is POST-only. Reads are naturally idempotent and adding a
+    // key to them would consume server-side idempotency storage for nothing.
+    let n = 0;
+    const fetchSpy = vi.fn(async () => {
+      n += 1;
+      if (n < 2) throw new TypeError('fetch failed');
+      return jsonResponse({ trade: TRADE_BASE, data: TRADE_BASE, _meta: META });
+    });
+    const kash = makeKash(fetchSpy as typeof fetch, 2);
+    await kash.trades.get(TRADE_BASE.id);
+    expect(fetchSpy.mock.calls.length).toBe(2);
+    for (const call of fetchSpy.mock.calls) {
+      expect(
+        ((call[1] as RequestInit).headers as Record<string, string>)['Idempotency-Key']
+      ).toBeUndefined();
+    }
+  });
+
+  it('create — a caller-supplied key is never overwritten', async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(
+        {
+          trade: TRADE_BASE,
+          data: TRADE_BASE,
+          _meta: { requestId: 'r1', timestamp: '2026-04-30T12:00:00.000Z', idempotent: false },
+        },
+        { status: 201 }
+      )
+    );
+    const kash = makeKash(fetchSpy as typeof fetch);
+    await kash.trades.create(
+      { marketId: TRADE_BASE.marketId, outcomeIndex: 0, amount: '100', side: 'buy' },
+      { idempotencyKey: 'order-2026-04-30-001' }
+    );
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe(
+      'order-2026-04-30-001'
+    );
   });
 
   it('create — surfaces idempotent: true on duplicate replay', async () => {
@@ -158,6 +291,26 @@ describe('TradesClient', () => {
     const kash = makeKash(fetchSpy as typeof fetch);
     const trade = await kash.trades.get(TRADE_BASE.id);
     expect(trade.id).toBe(TRADE_BASE.id);
+  });
+
+  it('get — keeps chainRef and accepts a completed Solana trade with a null txHash', async () => {
+    // The API nulls `txHash` for every non-EVM trade and sends `chainRef` from
+    // 2026-08-19. Before 0.1.5 the schema did not declare chainRef, so it was
+    // stripped from the parsed resource.
+    const solanaTrade = {
+      ...TRADE_BASE,
+      status: 'completed' as TradeStatus,
+      chainRef: 'solana:mainnet-beta',
+      txHash: null,
+      tokensOut: '125000000000000000000',
+    };
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse({ trade: solanaTrade, data: solanaTrade, _meta: META })
+    );
+    const kash = makeKash(fetchSpy as typeof fetch);
+    const trade = await kash.trades.get(TRADE_BASE.id);
+    expect(trade.chainRef).toBe('solana:mainnet-beta');
+    expect(trade.txHash).toBeNull();
   });
 
   it('list — async iteration walks pages', async () => {

@@ -68,6 +68,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'ListTradesResponseSchema',
   'ListWebhookEventsResponseSchema',
   'MarketOutcomeSchema',
+  'MarketResolutionStateSchema',
   'MarketResourceSchema',
   'MarketStatusSchema',
   'MarketsClient',

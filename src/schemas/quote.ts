@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 
+import { publicChainIdSchema } from './_chain.js';
 import { MetaSchema } from './common.js';
 
 const wadIntegerString = z.string().regex(/^\d+$/, 'Must be a non-negative integer string');
@@ -28,7 +29,21 @@ export type QuoteAction = z.infer<typeof QuoteActionSchema>;
 export const QuoteMarketSummarySchema = z.object({
   id: z.string().uuid(),
   contractAddress: z.string(),
-  chainId: z.number().int().positive(),
+  /**
+   * EVM chain id. **Required on the 0.1.x line**, exactly as 0.1.3 typed it.
+   * The API version this line pins (`2026-04-29`) refuses a non-EVM quote with
+   * 400 CHAIN_NOT_SUPPORTED, so every quote it returns carries one. 0.2.0 makes
+   * it optional, because `2026-08-19` serves Solana quotes without it.
+   */
+  chainId: publicChainIdSchema,
+  /**
+   * Self-describing chain identity — `evm:8453`, `solana:devnet`.
+   *
+   * Sent by the API from version `2026-08-19` onward and absent on the
+   * version this release pins, so it is optional: the key is missing, not
+   * empty.
+   */
+  chainRef: z.string().optional(),
   outcomes: z.array(
     z.object({
       index: z.number().int().nonnegative(),
@@ -36,7 +51,7 @@ export const QuoteMarketSummarySchema = z.object({
       probability: z.number().min(0).max(1),
     })
   ),
-  status: z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED']).nullable(),
+  status: z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']).nullable(),
 });
 
 export type QuoteMarketSummary = z.infer<typeof QuoteMarketSummarySchema>;

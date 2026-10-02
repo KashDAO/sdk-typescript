@@ -155,7 +155,7 @@ After all five pass, proceed below.
 
 Always dry-run before the real publish. The same script with
 `--dry-run` runs every gate (typecheck, lint, test, build,
-bundle-size cap, SBOM, runtime smoke under Node + Bun + Deno) plus
+size-limit bundle gate, SBOM, runtime smoke under Node + Bun + Deno) plus
 the CHANGELOG-slice extraction for the GitHub Release — but stops
 short of `npm publish` and `gh release create`. Use it to verify
 end-to-end that:
@@ -185,7 +185,7 @@ The script:
 
 1. Verifies you're logged in to npm (`npm whoami`).
 2. Confirms the version isn't already published.
-3. Re-runs the pre-publish gate (typecheck, lint, test, build, bundle-size cap, SBOM, runtime smoke).
+3. Re-runs the pre-publish gate (typecheck, lint, test, build, size-limit bundle gate, SBOM, runtime smoke).
 4. Asks for an interactive `yes` confirmation.
 5. Runs `npm publish --access public --ignore-scripts`.
 6. Best-effort drafts a GitHub Release on the public mirror via

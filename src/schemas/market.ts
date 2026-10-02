@@ -9,9 +9,10 @@
 
 import { z } from 'zod';
 
+import { publicChainIdSchema } from './_chain.js';
 import { MetaSchema, PaginationSchema } from './common.js';
 
-export const MarketStatusSchema = z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED']);
+export const MarketStatusSchema = z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']);
 export type MarketStatus = z.infer<typeof MarketStatusSchema>;
 
 export const MarketOutcomeSchema = z.object({
@@ -22,10 +23,38 @@ export const MarketOutcomeSchema = z.object({
 
 export type MarketOutcome = z.infer<typeof MarketOutcomeSchema>;
 
+export const MarketResolutionStateSchema = z.enum([
+  'resolving',
+  'proposed',
+  'settling',
+  'resolved',
+  'cancelled',
+]);
+export type MarketResolutionState = z.infer<typeof MarketResolutionStateSchema>;
+
 export const MarketResourceSchema = z.object({
   id: z.string().uuid(),
   contractAddress: z.string(),
-  chainId: z.number().int().positive(),
+  /**
+   * EVM chain id. **Required on the 0.1.x line**, exactly as 0.1.3 typed it, so
+   * a patch upgrade changes no consumer's types.
+   *
+   * That is sound for the API version this line pins (`2026-04-29`): it never
+   * serves a non-EVM market — `GET /v1/markets` filters them out and
+   * `GET /v1/markets/{id}` answers 400 CHAIN_NOT_SUPPORTED — so every market it
+   * returns carries a real EVM `chainId`. From version `2026-08-19` a Solana
+   * market omits the key; 0.2.0 makes it optional and pins that version.
+   *
+   * `publicChainIdSchema` refuses the internal Solana surrogate ids (a runtime
+   * guard added after 0.1.3; the API no longer emits them on any version).
+   */
+  chainId: publicChainIdSchema,
+  /**
+   * Chain-neutral identifier (`evm:8453`, `solana:devnet`). Present from API
+   * version 2026-08-19 onward on every market, whatever its family; absent on
+   * the version this release pins, hence optional.
+   */
+  chainRef: z.string().optional(),
   title: z.string().nullable(),
   description: z.string().nullable(),
   status: MarketStatusSchema.nullable(),
@@ -39,6 +68,29 @@ export const MarketResourceSchema = z.object({
   // KashValidationError against any environment that has not deployed it yet.
   freezeAt: z.string().datetime().nullable().optional(),
   resolvedAt: z.string().datetime().nullable(),
+  // Dispute-window settlement state ("Ended — proposed outcome X — dispute
+  // window ends at T"). Null when the market has no pending proposal.
+  // Optional for the same forward-compat reason as `freezeAt`: an API
+  // deployment older than the dispute-window feature omits the key entirely.
+  resolution: z
+    .object({
+      proposedOutcomeIndex: z.number().int().nonnegative(),
+      proposedAt: z.string().datetime().nullable(),
+      finalizableAt: z.string().datetime().nullable(),
+      settlementStatus: z.enum(['proposed', 'disputed', 'finalized', 'cancelled']),
+      disputeOpen: z.boolean(),
+    })
+    .nullable()
+    .optional(),
+  /**
+   * The market's coarse, user-facing resolution state: `resolving` means the
+   * market has ended and its outcome is being determined, `proposed` that an
+   * outcome is proposed and the dispute window is open, `settling` that the
+   * outcome is decided and being written on-chain. It never says who is
+   * resolving the market. Null before expiry. Optional for the same forward-compat reason as
+   * `freezeAt`: an API deployment older than the field omits the key.
+   */
+  resolutionState: MarketResolutionStateSchema.nullable().optional(),
 });
 
 export type MarketResource = z.infer<typeof MarketResourceSchema>;
@@ -113,7 +165,31 @@ export const PredictionResourceSchema = z.object({
   timestamp: z.string().datetime(),
   blockNumber: z.string(),
   transactionHash: z.string(),
-  logIndex: z.number().int().nonnegative(),
+  /**
+   * EVM log index within the transaction. **NULL ON A NON-EVM CHAIN**, because
+   * there is no such thing to report.
+   *
+   * Measured on staging 2026-09-13, the same market feed on both lanes:
+   *
+   * | field | evm:84532 | solana:devnet |
+   * | --- | --- | --- |
+   * | `transactionHash` | `0x952c…cd49` | `4PuVtUZx…86rRQ` (base58 signature) |
+   * | `logIndex` | `91` | **`null`** |
+   * | `id` | `0x952c…cd49-91` | `4PuVtUZx…86rRQ-2-1` |
+   *
+   * A Solana trade is located by (signature, instruction index, inner index),
+   * which the row `id` already carries; an EVM log index has no counterpart, so
+   * the honest answer is null rather than a fabricated zero. **Zero would be
+   * WORSE than null**: it is a legal EVM log index, so it would collide with a
+   * real first-log-in-transaction trade and be indistinguishable from one.
+   *
+   * This was REQUIRED on both the API and the SDK until 2026-09-13 while the
+   * API served null anyway, so the contract was already violated by its own
+   * data and only the SDK's parse ever said so — `Response schema mismatch:
+   * data.0.logIndex: Expected number, received null`, which stopped the
+   * trading fleet from building a snapshot for either Solana market.
+   */
+  logIndex: z.number().int().nonnegative().nullable(),
 });
 
 export type PredictionResource = z.infer<typeof PredictionResourceSchema>;

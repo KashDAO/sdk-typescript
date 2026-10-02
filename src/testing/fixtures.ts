@@ -46,6 +46,8 @@ export const DEFAULT_MARKET: MarketResource = {
   expiresAt: '2026-12-31T23:59:59.000Z',
   freezeAt: '2026-12-31T23:54:59.000Z',
   resolvedAt: null,
+  resolution: null,
+  resolutionState: null,
 };
 
 /** Default {@link PredictionResource} — a 100-USDC buy on outcome 0. */

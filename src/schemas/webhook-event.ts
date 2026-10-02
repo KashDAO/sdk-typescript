@@ -21,7 +21,8 @@
  *
  * const event = WebhookEventSchema.parse(JSON.parse(rawBody));
  * if (event.type === 'trade.completed') {
- *   // event.data.txHash, event.data.tokensOut — both typed string
+ *   // event.data.txHash — an EVM hash or a base58 Solana signature
+ *   // event.data.chainRef — "evm:8453", "solana:mainnet-beta"
  * }
  * ```
  *
@@ -38,6 +39,16 @@ import { z } from 'zod';
 const tradeWebhookCommonSchema = z.object({
   tradeId: z.string().uuid(),
   marketId: z.string().uuid(),
+  /**
+   * Self-describing chain identity of the trade's market — `"evm:8453"`,
+   * `"solana:mainnet-beta"`.
+   *
+   * A webhook is pushed, so it carries no version header to negotiate with:
+   * the server sends `chainRef` on every trade webhook whatever version the
+   * key pins. Optional because an event enqueued before the field existed can
+   * still be delivered after it, and a required field would reject it.
+   */
+  chainRef: z.string().optional(),
   outcomeIndex: z.number().int().nonnegative(),
   amount: z.string().regex(/^\d+(\.\d{1,6})?$/),
   side: z.enum(['buy', 'sell']),
@@ -66,7 +77,36 @@ export type TradeConfirmationRequiredPayload = z.infer<
 
 export const TradeCompletedPayloadSchema = tradeWebhookCommonSchema.extend({
   status: z.literal('completed'),
-  txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  /**
+   * Chain transaction id — an EVM hash (`0x` + 64 hex) OR a base58 Solana
+   * signature.
+   *
+   * This carried `/^0x[a-fA-F0-9]{64}$/` until 2026-09-13, which describes one
+   * of the two chains the API already serves: measured that day it held 83
+   * completed Solana trades, whose ids are base58 and share no character class
+   * with the hex form. Since this schema PARSES the payload in the customer's
+   * own process — `WebhookEventSchema.parse`, or `constructEvent` — that
+   * pattern would not have mis-documented a Solana trade, it would have THROWN
+   * inside their webhook handler.
+   *
+   * The base58 branch checks the ALPHABET and deliberately not the length. A
+   * signature is 64 bytes, but base58 renders leading zero bytes as `1`s that
+   * carry no magnitude, so its output length is not fixed and any bound here
+   * would invent a limit the chain does not have. The alphabet alone is enough
+   * to keep this a real constraint — it excludes `0`, `O`, `I` and `l`, and
+   * rejects anything with a separator in it.
+   *
+   * A SHAPE check, not a validity one: `constructEvent` has already verified
+   * the HMAC, so the bytes are authenticated before they reach this schema.
+   * Verifying that a signature is well-formed 64 bytes needs a base58 decoder,
+   * and this package has exactly one dependency (`zod`) by design.
+   */
+  txHash: z
+    .string()
+    .regex(
+      /^(?:0x[a-fA-F0-9]{64}|[1-9A-HJ-NP-Za-km-z]+)$/,
+      'must be an EVM transaction hash or a base58 Solana signature'
+    ),
   /** WAD-encoded outcome tokens received (integer string). */
   tokensOut: z.string().regex(/^\d+$/),
 });

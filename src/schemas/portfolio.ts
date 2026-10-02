@@ -29,6 +29,12 @@ export const PositionsResponseSchema = z.object({
 export type PositionsResponse = z.infer<typeof PositionsResponseSchema>;
 
 export const PortfolioSummarySchema = z.object({
+  /**
+   * The address that holds the key owner's funds. Despite the name it is not
+   * always an EVM smart account: for a user whose funds live on Solana it is
+   * their base58 Solana wallet address. Treat it as an opaque chain address
+   * and do not assume a `0x` prefix.
+   */
   smartAccountAddress: z.string(),
   activePositions: z.number().int().nonnegative(),
   totalCostBasisAtomic: z.string().regex(/^\d+$/),

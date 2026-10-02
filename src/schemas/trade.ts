@@ -104,9 +104,36 @@ export const TradeResourceSchema = z.object({
   status: TradeStatusSchema,
   correlationId: z.string().uuid(),
   clientRequestId: ClientRequestIdSchema.nullable(),
+  /**
+   * Self-describing chain identity of the trade's market — `"evm:8453"`,
+   * `"solana:mainnet-beta"`.
+   *
+   * Sent from API version `2026-08-19` onward and ABSENT on earlier versions,
+   * which is why it is optional rather than nullable: an older-version
+   * response does not carry the key at all. This resource never had a numeric
+   * `chainId`, so nothing is replaced.
+   */
+  chainRef: z.string().optional(),
+  /**
+   * An EVM hash OR a base58 Solana signature. See the note on
+   * `webhook-event.ts`; the alphabet is checked, the length deliberately not.
+   *
+   * **`null` for every Solana trade, on every API version, even once
+   * `completed`.** The trade resource publishes only EVM transaction hashes
+   * today. The `trade.completed` webhook carries the real Solana signature, so
+   * a consumer that needs it should read it there.
+   *
+   * The response IS parsed through this schema, so the old `0x`-only pattern
+   * was inert only because the API sends `null` here for Solana trades. It
+   * still described a wire shape the API does not have: measured 2026-09-13,
+   * `api_trade_requests` held 83 completed Solana trades.
+   */
   txHash: z
     .string()
-    .regex(/^0x[a-fA-F0-9]{64}$/)
+    .regex(
+      /^(?:0x[a-fA-F0-9]{64}|[1-9A-HJ-NP-Za-km-z]+)$/,
+      'must be an EVM transaction hash or a base58 Solana signature'
+    )
     .nullable(),
   tokensOut: z.string().regex(/^\d+$/).nullable(),
   errorCode: z.string().nullable(),

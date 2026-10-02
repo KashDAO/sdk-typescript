@@ -15,6 +15,7 @@
 
 import { z } from 'zod';
 
+import { publicChainIdSchema } from './_chain.js';
 import { MetaSchema } from './common.js';
 
 /**
@@ -36,7 +37,7 @@ export const TraceEventDataSchema = z
     /** Human USDC decimal amount. */
     amount: z.string().optional(),
     /** Source-chain id when the event involves a chain-specific op. */
-    chainId: z.number().int().positive().optional(),
+    chainId: publicChainIdSchema.optional(),
     /** On-chain tx hash (executed/funding/bridge events). */
     txHash: z.string().optional(),
     /** Outcome tokens received (executed events). */
