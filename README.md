@@ -28,10 +28,12 @@ Official TypeScript SDK for the [Kash](https://kash.bot) public API.
 - [Quickstart](#quickstart)
 - [Configuration](#configuration)
 - [API versioning](#api-versioning) — pinning behaviour to a specific dated server release
+- [Chains](#chains) — Solana first, Base while its markets resolve; `chainRef`
 - [Resources](#resources)
   - [Markets](#markets)
   - [Quotes](#quotes)
   - [Trades](#trades)
+  - [Redemptions](#redemptions)
   - [Portfolio](#portfolio)
   - [Webhooks](#webhooks)
   - [Account](#account)
@@ -65,7 +67,7 @@ A first trade in five steps. Total time: about 5 minutes.
 > Issue a `kash_live_*` key yourself under **Settings → API Keys** in
 > the [Kash app](https://app.kash.bot) — the SDK auto-routes it to
 > production. Prefer to dry-run first? A `kash_test_*` key routes to
-> staging (`api-staging.kash.bot`, Base Sepolia, simulated USDC).
+> staging (`api-staging.kash.bot`, Solana devnet, simulated USDC).
 
 ### 1. Create a Kash account
 
@@ -76,14 +78,14 @@ automatically; you don't need to bring your own wallet.
 ### 2. Create an API key
 
 In the [Kash app](https://app.kash.bot), go to **Settings → API Keys →
-Create API Key**. Choose `Live` for real USDC on Base mainnet or `Test`
-for simulated trades on Base Sepolia, set the scopes and (optionally) an
+Create API Key**. Choose `Live` for real USDC on Solana mainnet or `Test`
+for simulated trades on Solana devnet, set the scopes and (optionally) an
 IP allowlist, and copy the plaintext secret. The key shape:
 
 | Field            | What it does                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ |
 | **Name**         | Free-form label, shown in audit logs (e.g. `acme-prod-trader`).                |
-| **Mode**         | `Live` (real USDC on Base mainnet) or `Test` (simulated, Base Sepolia).        |
+| **Mode**         | `Live` (real USDC on Solana mainnet) or `Test` (simulated, Solana devnet).     |
 | **Scopes**       | Permission set — see [API keys](#api-keys).                                    |
 | **IP allowlist** | Optional list of CIDR ranges. Empty = any IP. Recommended for production keys. |
 
@@ -318,10 +320,16 @@ Two parallel environments, distinguished by the API key prefix:
 | --------------- | --------------------------------- | ------------------------- |
 | Key prefix      | `kash_test_…`                     | `kash_live_…`             |
 | API base URL    | `https://api-staging.kash.bot/v1` | `https://api.kash.bot/v1` |
-| Blockchain      | Base Sepolia (testnet)            | Base mainnet              |
+| Blockchain      | Solana devnet ¹                   | Solana mainnet ¹          |
 | USDC            | Test USDC (faucet via the app)    | Real USDC                 |
 | Markets         | Test markets only                 | Live markets only         |
 | Webhook secrets | `whsec_…` (separate from live)    | `whsec_…` (separate)      |
+
+¹ Solana has been Kash's canonical chain since 2026-10-01; every new market is
+created there. Markets created on Base before the cutover (Base Sepolia on
+test, Base mainnet on live) keep trading and resolving on Base and stay fully
+supported until they settle. Each market says which chain it is on in its
+`chainRef` — see [Chains](#chains).
 
 ### Just give the SDK a key. It picks the right URL automatically.
 
@@ -418,7 +426,7 @@ choices:
 
 2. **Integration tests against a real server** — use a `kash_test_*`
    key. The auto-route sends every call to staging
-   (`api-staging.kash.bot`), where trades execute on Base Sepolia
+   (`api-staging.kash.bot`), where trades execute on Solana devnet
    with simulated funds. No real money, full lifecycle. See
    [Test mode vs live mode](#test-mode-vs-live-mode).
 
@@ -544,6 +552,13 @@ const kash = new KashClient({ apiKey, apiVersion: '2026-08-15' });
 const kash = new KashClient({ apiKey, apiVersion: '2026-01-01' });
 ```
 
+**This release pins `2026-08-19`.** That version serves Solana markets, names
+every market's chain with `chainRef`, and omits `chainId` for a Solana market.
+Pinning the older `2026-04-29` keeps the EVM-only behaviour — Solana markets are
+filtered out of `markets.list()` and `markets.get()` refuses them with
+`CHAIN_NOT_SUPPORTED` — so only do that if you trade residual Base markets
+exclusively. See [`MIGRATION-0.2.md`](./MIGRATION-0.2.md).
+
 The constant `SDK_API_VERSION` is exported so consumers can log it
 alongside their error reports:
 
@@ -597,6 +612,53 @@ documents the full negotiation contract.
 
 Versions are strict ISO dates: `YYYY-MM-DD`. The SDK rejects malformed
 values at construction with `KashConfigurationError`.
+
+## Chains
+
+**Solana is Kash's canonical chain** — production cut over on 2026-10-01, and
+every new market is created on Solana mainnet (staging: Solana devnet).
+**Base is still supported**: markets created on Base before the cutover keep
+trading and resolving there, and this SDK serves both side by side. You do not
+choose a chain per call; each market lives on one, and trades, quotes and
+redemptions route to it.
+
+Every market, quote, trade and trade webhook names its chain with `chainRef`:
+
+| `chainRef`            | Chain                            |
+| --------------------- | -------------------------------- |
+| `solana:mainnet-beta` | Solana mainnet (live, canonical) |
+| `solana:devnet`       | Solana devnet (test, canonical)  |
+| `evm:8453`            | Base mainnet (live, pre-cutover) |
+| `evm:84532`           | Base Sepolia (test, pre-cutover) |
+
+The wire field is a plain string, so a chain added later never makes a response
+fail to parse. For a typed view, parse it:
+
+```ts
+import { parseChainRef, tryParseChainRef, formatChainRef } from '@kashdao/sdk';
+
+const market = await kash.markets.get(id);
+const chain = market.chainRef ? tryParseChainRef(market.chainRef) : undefined;
+if (chain?.type === 'solana') {
+  console.log('Solana cluster', chain.cluster); // 'mainnet-beta'
+} else if (chain?.type === 'evm') {
+  console.log('EVM chain', chain.chainId); // 8453
+}
+
+parseChainRef('eip155:8453'); // CAIP-2 alias → { type: 'evm', chainId: 8453 }
+formatChainRef({ type: 'solana', cluster: 'devnet' }); // 'solana:devnet'
+```
+
+`parseChainRef` throws `KashValidationError` on anything else;
+`tryParseChainRef` returns `undefined`.
+
+What differs on Solana:
+
+- **Addresses are base58.** `market.contractAddress` and
+  `portfolio.smartAccountAddress` may be base58 Solana addresses, not `0x` hex.
+- **`chainId` is absent** on a Solana market or quote. Use `chainRef`.
+- **`trade.txHash` is `null`** for a Solana trade, even once `completed`. The
+  `trade.completed` webhook carries the base58 transaction signature.
 
 ## Resources
 
@@ -755,6 +817,26 @@ if (isAwaitingConfirmation(t)) {
 The three top-level guards (`isAwaitingConfirmation`, `isPendingTrade`,
 `isTerminalTrade`) are mutually exclusive and exhaustive over every
 trade status — the `else` chain above never falls through.
+
+### Redemptions
+
+When a market resolves (or is cancelled), winning tokens stay in your wallet
+until you redeem them — nothing claims them for you. One call redeems one
+(market, outcome) position, on Solana or Base:
+
+```ts
+const redemption = await kash.redemptions.create({ marketId, outcomeIndex: 0 });
+// { id, marketId, outcomeIndex, kind: 'resolved' | 'cancelled', sharesWad, status: 'pending', idempotent }
+```
+
+Requires the `trades:write` scope. The payout executes asynchronously after
+the request is accepted. Calling it again for a position that already has a
+request returns that request with `idempotent: true`. A position that cannot be
+redeemed (unresolved market, losing outcome, already redeemed) throws
+`KashConflictError` with code `POSITION_NOT_CLAIMABLE`. The same code is
+returned when a **previous redemption for that position failed**: the failed
+request still holds the position's slot, so retrying will not help — contact
+support. The error message (the server's `detail`) says which case applies.
 
 ### Portfolio
 
@@ -1495,9 +1577,12 @@ try {
 
 ## What's NOT in this SDK yet
 
-For full transparency on the v0.1 surface — the following capabilities exist
+For full transparency on the v0.2 surface — the following capabilities exist
 on the Kash platform but are **not** wrapped by this SDK release. They're
 either accessible via the API directly or planned for a future version:
+
+- **Market disputes and competitions** — `/v1/markets/{id}/disputes` and
+  `/v1/competitions*` are served by the API but not yet wrapped as SDK methods.
 
 - **API key self-service** (`auth:manage` scope) — issue/list/revoke keys
   programmatically. Available today in the app under **Settings → API
@@ -1559,7 +1644,7 @@ After 1.0:
 
 | Need                         | Where to go                                                                                                                                        |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Create an API key**        | **Settings → API Keys → Create API Key** in the [Kash app](https://app.kash.bot) — `Live` (Base mainnet) or `Test` (Base Sepolia)                  |
+| **Create an API key**        | **Settings → API Keys → Create API Key** in the [Kash app](https://app.kash.bot) — `Live` (Solana mainnet) or `Test` (Solana devnet)               |
 | **Bug reports**              | [GitHub issues](https://github.com/KashDAO/sdk-typescript/issues) — please include the SDK version, runtime, and `requestId` from the failing call |
 | **Feature requests**         | [GitHub discussions](https://github.com/KashDAO/sdk-typescript/discussions)                                                                        |
 | **Security vulnerabilities** | `security@kash.bot` — see [SECURITY.md](./SECURITY.md). **Do NOT file public issues.**                                                             |

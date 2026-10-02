@@ -84,7 +84,7 @@ What the script does:
 1. Clones the mirror into a temp dir.
 2. Wipes the mirror working tree (preserving `.git`).
 3. Copies `src/`, `tests/`, `examples/`, `.github/` (issue templates only),
-   README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE,
+   README.md, CHANGELOG.md, MIGRATION-0.2.md, CONTRIBUTING.md, SECURITY.md, LICENSE,
    tsup.config.ts, and `.gitignore`.
 4. Drops monorepo-only test files (`*.private.test.ts`).
 5. Writes a standalone `tsconfig.json`, `vitest.config.ts`, and

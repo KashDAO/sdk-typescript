@@ -31,7 +31,10 @@ const completed = await kash.trades.waitForCompletion(trade.id, {
 });
 
 if (completed.status === 'completed') {
-  console.log('done:', completed.txHash);
+  // `chainRef` names the market's chain ('solana:mainnet-beta', 'evm:8453').
+  // `txHash` is null for a Solana trade; the trade.completed webhook carries
+  // its base58 signature.
+  console.log('done on', completed.chainRef, completed.txHash ?? '(signature via webhook)');
 } else {
   console.error('trade failed:', completed.errorCode, completed.errorMessage);
   process.exit(1);

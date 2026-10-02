@@ -29,4 +29,4 @@ if (trade.confirmation) {
 }
 
 const completed = await kash.trades.waitForCompletion(trade.id);
-console.log('terminal status:', completed.status, completed.txHash);
+console.log('terminal status:', completed.status, completed.chainRef);

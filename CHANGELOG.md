@@ -10,20 +10,21 @@ breaking changes are explicitly called out in the entry.
 
 ## [Unreleased]
 
-## [0.1.6] - 2026-10-02
+## [0.2.1] - 2026-10-02
 
-**0.1.5 was tagged but never published to npm.** 0.1.6 is its first published
-form: its source is the `sdk-v0.1.5` tag's apart from the version constant
-(`SDK_VERSION`, and so `USER_AGENT`), so everything listed under 0.1.5 below
-ships here. `SDK_API_VERSION` stays `2026-04-29`, so a `^0.1.3` consumer picks
-it up with no code change.
+**0.2.0 was tagged but never published to npm.** 0.2.1 is its first published
+form: its source is the `sdk-v0.2.0` tag's apart from the version constant
+(`SDK_VERSION`, and so `USER_AGENT`), so everything listed under
+0.2.0 below — including its breaking changes and
+[`MIGRATION-0.2.md`](./MIGRATION-0.2.md) — ships here. Upgrading from 0.1.x
+means reading the 0.2.0 entry.
 
 ### Changed
 
 - **Release gate: `size-limit` is the only bundle-size check.** The publish
   script also measured the unminified ESM entry with `gzip -9` against a
   24,576-byte cap, a legacy duplicate of the `size-limit` gate that refused
-  0.1.5 although every entry was well inside its real cap. It is removed.
+  0.2.0 although every entry was well inside its real cap. It is removed.
   `size-limit` measures each entry as a consumer's bundler ships it
   (minified, then brotli-compressed) against per-entry caps in
   `package.json#size-limit`: 24 KB for `@kashdao/sdk`, 8 KB for
@@ -33,6 +34,54 @@ it up with no code change.
 
 - README and CONTRIBUTING describe the `size-limit` caps and `pnpm size`
   instead of the retired raw-gzip figure.
+
+## [0.2.0] - 2026-10-01
+
+Solana is Kash's canonical chain from 2026-10-01. This release makes the SDK
+see it by default. **Breaking** (a `0.x` minor) — read
+[`MIGRATION-0.2.md`](./MIGRATION-0.2.md) before upgrading.
+
+### Changed
+
+- **BREAKING: `MarketResource.chainId` and `QuoteMarketSummary.chainId` are
+  `number | undefined`** (required `number` through 0.1.5). Under
+  `2026-08-19` a Solana market or quote omits the key and names its chain with
+  `chainRef`. Under strict TypeScript, reads that assumed a number stop
+  compiling; that is the point — guard them or switch to `chainRef`.
+- **BREAKING: `SDK_API_VERSION` is now `2026-08-19`** (was `2026-04-29`).
+  Every request pins the newer version unless you pass `apiVersion`. Under it,
+  `markets.list()` includes Solana markets, `markets.get()` and the quotes
+  endpoints serve them instead of answering `400 CHAIN_NOT_SUPPORTED`, every
+  market, quote and trade carries `chainRef`, and **`chainId` is absent on a
+  Solana market or quote**. Code that reads `market.chainId` unconditionally
+  must switch to `chainRef`.
+- `@kashdao/sdk/testing` defaults now describe a Solana mainnet market in the
+  `2026-08-19` shape: `DEFAULT_MARKET` and the quote fixtures carry
+  `chainRef: 'solana:mainnet-beta'` and a base58 `contractAddress` and no
+  `chainId`; `DEFAULT_TRADE` carries `chainRef`; `DEFAULT_COMPLETED_TRADE`
+  has a `null` `txHash`; `DEFAULT_PORTFOLIO_SUMMARY` holds a base58 wallet.
+  Tests asserting on the old Base values need updating.
+
+### Added
+
+- **`kash.redemptions.create({ marketId, outcomeIndex })`** — redeem a settled
+  position (`POST /v1/redemptions`), on Solana or Base. Returns the redemption
+  resource plus `idempotent`. Exports `RedemptionsClient`,
+  `CreateRedemptionBodySchema`, `CreateRedemptionResponseSchema`,
+  `RedemptionResourceSchema`, `RedemptionKindSchema` and their types; the mock
+  client gains `redemptions.create` and `DEFAULT_REDEMPTION`.
+- **Typed chain references**: `parseChainRef`, `tryParseChainRef`,
+  `formatChainRef`, `SOLANA_CLUSTERS`, and the `ChainRef` / `SolanaCluster`
+  types. Parses `solana:<cluster>` and `evm:<chainId>`, and accepts the CAIP-2
+  `eip155:<chainId>` spelling as an alias. The wire fields stay plain strings,
+  so an unfamiliar chain never fails a response.
+- `MIGRATION-0.2.md`, shipped in the npm package.
+
+### Documentation
+
+- README rewritten Solana-first: live keys trade on Solana mainnet, test keys
+  on Solana devnet, and Base is documented as supported while its pre-cutover
+  markets resolve. New **Chains** and **Redemptions** sections.
 
 ## [0.1.5] - 2026-10-01
 

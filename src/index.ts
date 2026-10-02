@@ -242,6 +242,24 @@ export type {
   WebhookEventType,
 } from './schemas/webhook-event.js';
 
+export {
+  CreateRedemptionBodySchema,
+  CreateRedemptionResponseSchema,
+  RedemptionKindSchema,
+  RedemptionResourceSchema,
+} from './schemas/redemption.js';
+export type {
+  CreateRedemptionBody,
+  CreateRedemptionResponse,
+  RedemptionKind,
+  RedemptionResource,
+} from './schemas/redemption.js';
+
+// Typed view of the `chainRef` string every resource carries from API
+// version 2026-08-19.
+export { SOLANA_CLUSTERS, formatChainRef, parseChainRef, tryParseChainRef } from './chain-ref.js';
+export type { ChainRef, SolanaCluster } from './chain-ref.js';
+
 // Resource client classes — exposed so consumers can type their own
 // dependency-injection helpers (and the contract test asserts they
 // remain stable).
@@ -253,6 +271,8 @@ export type {
   TradeCreateResult,
   WaitForCompletionOptions,
 } from './clients/trades.js';
+export { RedemptionsClient } from './clients/redemptions.js';
+export type { CreateRedemptionOptions, RedemptionCreateResult } from './clients/redemptions.js';
 export { PortfolioClient } from './clients/portfolio.js';
 export type { ListPositionsParams } from './clients/portfolio.js';
 export { AccountClient } from './clients/account.js';

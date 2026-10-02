@@ -36,23 +36,23 @@ export const MarketResourceSchema = z.object({
   id: z.string().uuid(),
   contractAddress: z.string(),
   /**
-   * EVM chain id. **Required on the 0.1.x line**, exactly as 0.1.3 typed it, so
-   * a patch upgrade changes no consumer's types.
+   * OPTIONAL from 0.2.0 (a required `number` through 0.1.5).
    *
-   * That is sound for the API version this line pins (`2026-04-29`): it never
-   * serves a non-EVM market — `GET /v1/markets` filters them out and
-   * `GET /v1/markets/{id}` answers 400 CHAIN_NOT_SUPPORTED — so every market it
-   * returns carries a real EVM `chainId`. From version `2026-08-19` a Solana
-   * market omits the key; 0.2.0 makes it optional and pins that version.
+   * From API version 2026-08-19 the market resource omits `chainId` for a
+   * non-EVM market and carries {@link chainRef} instead: a surrogate chain id
+   * has no meaning to an external consumer, so the key is ABSENT rather than
+   * holding a number that lies. 0.2.0 pins that version, so a Solana market
+   * arrives without `chainId`. The older `2026-04-29` never serves such a
+   * market, which is why the 0.1.x line could keep the field required.
    *
-   * `publicChainIdSchema` refuses the internal Solana surrogate ids (a runtime
-   * guard added after 0.1.3; the API no longer emits them on any version).
+   * `publicChainIdSchema` still refuses the internal surrogate ids.
    */
-  chainId: publicChainIdSchema,
+  chainId: publicChainIdSchema.optional(),
   /**
    * Chain-neutral identifier (`evm:8453`, `solana:devnet`). Present from API
-   * version 2026-08-19 onward on every market, whatever its family; absent on
-   * the version this release pins, hence optional.
+   * version 2026-08-19 onward on every market, whatever its family. Optional
+   * for the same reason `chainId` is: on the canonical version the key is
+   * missing, not empty.
    */
   chainRef: z.string().optional(),
   title: z.string().nullable(),

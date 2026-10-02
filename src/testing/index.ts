@@ -61,6 +61,7 @@ import {
   KashWebhookSignatureError,
 } from '../errors.js';
 import { Page } from '../internal/pagination.js';
+import { CreateRedemptionBodySchema, type CreateRedemptionBody } from '../schemas/redemption.js';
 import {
   CreateTradeBodySchema,
   type CreateTradeBody,
@@ -79,6 +80,7 @@ import {
   DEFAULT_QUOTE_BUY,
   DEFAULT_QUOTE_SELL,
   DEFAULT_REDELIVER_EVENT,
+  DEFAULT_REDEMPTION,
   DEFAULT_TRACE,
   DEFAULT_TRADE,
   DEFAULT_WEBHOOK_EVENT,
@@ -87,6 +89,7 @@ import {
 import type { HealthCheckResult } from '../client.js';
 import type { ListPositionsParams } from '../clients/portfolio.js';
 import type { BuyQuoteParams, SellQuoteParams } from '../clients/quotes.js';
+import type { CreateRedemptionOptions, RedemptionCreateResult } from '../clients/redemptions.js';
 import type {
   CreateTradeOptions,
   TradeConfirmation,
@@ -144,6 +147,13 @@ export type MockTradesOverrides = {
   ) => TradeResource | Promise<TradeResource>;
 };
 
+export type MockRedemptionsOverrides = {
+  readonly create?: (
+    body: CreateRedemptionBody,
+    opts?: CreateRedemptionOptions
+  ) => RedemptionCreateResult | Promise<RedemptionCreateResult>;
+};
+
 export type MockQuotesOverrides = {
   readonly buy?: (
     params: BuyQuoteParams
@@ -189,6 +199,7 @@ export type MockTracesOverrides = {
 export type MockKashClientOverrides = {
   readonly markets?: MockMarketsOverrides;
   readonly trades?: MockTradesOverrides;
+  readonly redemptions?: MockRedemptionsOverrides;
   readonly quotes?: MockQuotesOverrides;
   readonly portfolio?: MockPortfolioOverrides;
   readonly webhooks?: MockWebhooksOverrides;
@@ -235,6 +246,12 @@ export type MockKashClient = {
     list(params?: ListTradesParams): Promise<Page<TradeResource>>;
     waitForCompletion(id: string, opts?: WaitForCompletionOptions): Promise<TradeResource>;
   };
+  readonly redemptions: {
+    create(
+      body: CreateRedemptionBody,
+      opts?: CreateRedemptionOptions
+    ): Promise<RedemptionCreateResult>;
+  };
   readonly quotes: {
     buy(params: BuyQuoteParams): Promise<Quote & QuoteBuyDetail>;
     sell(params: SellQuoteParams): Promise<Quote & QuoteSellDetail>;
@@ -280,6 +297,7 @@ export type MockKashClient = {
 export function createMockKashClient(overrides: MockKashClientOverrides = {}): MockKashClient {
   const m = overrides.markets ?? {};
   const t = overrides.trades ?? {};
+  const r = overrides.redemptions ?? {};
   const q = overrides.quotes ?? {};
   const p = overrides.portfolio ?? {};
   const w = overrides.webhooks ?? {};
@@ -336,6 +354,32 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
           : { ...DEFAULT_COMPLETED_TRADE, id };
         opts?.onStatus?.(result);
         return result;
+      },
+    },
+    redemptions: {
+      create: async (body: CreateRedemptionBody, opts?: CreateRedemptionOptions) => {
+        // Same fail-fast pre-validation as the real client.
+        const parsed = CreateRedemptionBodySchema.safeParse(body);
+        if (!parsed.success) {
+          const issues = parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+            code: i.code,
+          }));
+          const lead = issues[0];
+          throw new KashValidationError(
+            `redemptions.create: ${lead ? `${lead.path || '(root)'}: ${lead.message}` : 'invalid redemption body'}`,
+            { code: 'VALIDATION_FAILED', issues }
+          );
+        }
+        return r.create
+          ? r.create(body, opts)
+          : {
+              ...DEFAULT_REDEMPTION,
+              marketId: body.marketId,
+              outcomeIndex: body.outcomeIndex,
+              idempotent: false,
+            };
       },
     },
     quotes: {
@@ -492,6 +536,7 @@ export {
   DEFAULT_QUOTE_BUY,
   DEFAULT_QUOTE_SELL,
   DEFAULT_REDELIVER_EVENT,
+  DEFAULT_REDEMPTION,
   DEFAULT_TRACE,
   DEFAULT_TRADE,
   DEFAULT_WEBHOOK_EVENT,

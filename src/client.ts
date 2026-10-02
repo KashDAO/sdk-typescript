@@ -26,6 +26,7 @@ import { AccountClient } from './clients/account.js';
 import { MarketsClient } from './clients/markets.js';
 import { PortfolioClient } from './clients/portfolio.js';
 import { QuotesClient } from './clients/quotes.js';
+import { RedemptionsClient } from './clients/redemptions.js';
 import { TracesClient } from './clients/traces.js';
 import { TradesClient } from './clients/trades.js';
 import { WebhooksClient } from './clients/webhooks.js';
@@ -60,6 +61,7 @@ export type HealthCheckResult = {
 export class KashClient {
   readonly markets: MarketsClient;
   readonly trades: TradesClient;
+  readonly redemptions: RedemptionsClient;
   readonly traces: TracesClient;
   readonly quotes: QuotesClient;
   readonly portfolio: PortfolioClient;
@@ -89,6 +91,7 @@ export class KashClient {
     this.http = new KashHttpClient(parsed.data);
     this.markets = new MarketsClient(this.http);
     this.trades = new TradesClient(this.http);
+    this.redemptions = new RedemptionsClient(this.http);
     this.traces = new TracesClient(this.http);
     this.quotes = new QuotesClient(this.http);
     this.portfolio = new PortfolioClient(this.http);

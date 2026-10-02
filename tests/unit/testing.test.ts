@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   KashRateLimitError,
+  KashValidationError,
   ListMarketsResponseSchema,
   ListPredictionsResponseSchema,
   ListTradesResponseSchema,
@@ -16,6 +17,7 @@ import {
   PortfolioSummaryResponseSchema,
   PositionsResponseSchema,
   QuoteResponseSchema,
+  RedemptionResourceSchema,
   TradeResourceSchema,
 } from '../../src/index.js';
 import {
@@ -28,6 +30,7 @@ import {
   DEFAULT_PORTFOLIO_SUMMARY,
   DEFAULT_POSITION,
   DEFAULT_REDELIVER_EVENT,
+  DEFAULT_REDEMPTION,
 } from '../../src/testing/index.js';
 
 const META = {
@@ -113,6 +116,7 @@ describe('createMockKashClient — surface compatibility', () => {
     expect(typeof kash.trades.get).toBe('function');
     expect(typeof kash.trades.list).toBe('function');
     expect(typeof kash.trades.waitForCompletion).toBe('function');
+    expect(typeof kash.redemptions.create).toBe('function');
     expect(typeof kash.quotes.buy).toBe('function');
     expect(typeof kash.quotes.sell).toBe('function');
     expect(typeof kash.portfolio.get).toBe('function');
@@ -241,6 +245,46 @@ describe('createMockKashClient — overrides', () => {
     expect(t.amount).toBe('50');
     expect(t.side).toBe('sell');
     expect(t.idempotent).toBe(false);
+  });
+
+  it('DEFAULT_REDEMPTION passes RedemptionResourceSchema', () => {
+    expect(RedemptionResourceSchema.safeParse(DEFAULT_REDEMPTION).success).toBe(true);
+  });
+
+  it('defaults describe a Solana mainnet market, in the 2026-08-19 shape', () => {
+    expect(DEFAULT_MARKET.chainRef).toBe('solana:mainnet-beta');
+    expect(DEFAULT_MARKET).not.toHaveProperty('chainId');
+    expect(DEFAULT_TRADE.chainRef).toBe('solana:mainnet-beta');
+    expect(DEFAULT_PORTFOLIO_SUMMARY.smartAccountAddress).not.toMatch(/^0x/);
+  });
+
+  it('redemptions.create echoes the requested position in the default', async () => {
+    const kash = createMockKashClient();
+    const r = await kash.redemptions.create({
+      marketId: '11111111-1111-4111-8111-111111111111',
+      outcomeIndex: 2,
+    });
+    expect(RedemptionResourceSchema.safeParse(r).success).toBe(true);
+    expect(r.outcomeIndex).toBe(2);
+    expect(r.idempotent).toBe(false);
+  });
+
+  it('redemptions.create pre-validates the body like the real client', async () => {
+    const kash = createMockKashClient();
+    await expect(
+      kash.redemptions.create({ marketId: 'nope', outcomeIndex: 0 })
+    ).rejects.toBeInstanceOf(KashValidationError);
+  });
+
+  it('redemptions.create override runs instead of the default', async () => {
+    const kash = createMockKashClient({
+      redemptions: { create: () => ({ ...DEFAULT_REDEMPTION, idempotent: true }) },
+    });
+    const r = await kash.redemptions.create({
+      marketId: '11111111-1111-4111-8111-111111111111',
+      outcomeIndex: 0,
+    });
+    expect(r.idempotent).toBe(true);
   });
 
   it('confirmation token can be returned from a create override', async () => {

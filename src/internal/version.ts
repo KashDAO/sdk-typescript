@@ -15,7 +15,7 @@
  * in `tests/unit/user-agent.test.ts` asserts the two stay in sync so
  * a forgotten bump fails CI.
  */
-export const SDK_VERSION = '0.1.6';
+export const SDK_VERSION = '0.2.1';
 
 /**
  * The Kash API version this SDK release was tested against. Sent as
@@ -36,7 +36,7 @@ export const SDK_VERSION = '0.1.6';
  * release cadence or for testing newer server-side behaviour without
  * a SDK upgrade.
  */
-export const SDK_API_VERSION = '2026-04-29';
+export const SDK_API_VERSION = '2026-08-19';
 
 /**
  * The runtime tag added to the `User-Agent`. Best-effort detection;

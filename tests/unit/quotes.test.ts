@@ -132,8 +132,7 @@ describe('QuotesClient', () => {
 });
 
 /*
- * Chain identity on the 0.1.x line — `chainId` stays required, `chainRef` is
- * an optional addition.
+ * THE 0.2.0 WIDENING — `chainId` optional (required through 0.1.5), `chainRef` added.
  *
  * Asserted against the SCHEMA directly rather than through a mocked transport,
  * because what changed is what the wire shape is allowed to be, and a transport
@@ -163,21 +162,26 @@ describe('QuoteMarketSummarySchema: chain identity across both API versions', ()
     if (r.success) expect(r.data.chainRef).toBe('evm:8453');
   });
 
-  it('keeps chainId REQUIRED, as 0.1.3 typed it: a quote without one is refused', () => {
-    // The pinned 2026-04-29 refuses non-EVM quotes with CHAIN_NOT_SUPPORTED,
-    // so this shape only reaches 0.2.0, which pins 2026-08-19.
+  it('accepts a Solana quote: chainRef present, chainId ABSENT', () => {
+    // The shape 0.1.3 rejected, and the whole reason for this release.
     const r = QuoteMarketSummarySchema.safeParse({
       ...base,
       contractAddress: 'So11111111111111111111111111111111111111112',
       chainRef: 'solana:devnet',
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.chainRef).toBe('solana:devnet');
+      expect(r.data.chainId).toBeUndefined();
+    }
   });
 
-  it('refuses a surrogate chain id', () => {
+  it('STILL refuses a surrogate chain id, so the widening did not open that door', () => {
     /*
-     * The runtime guard added after 0.1.3: a surrogate id is refused even
-     * though it is a positive integer.
+     * The discriminating case. `chainId` became optional, NOT permissive —
+     * `publicChainIdSchema`'s refusal of surrogates has to survive being made
+     * optional, and `.optional()` wrapping a refinement is exactly the spot
+     * where that could have been lost.
      */
     const r = QuoteMarketSummarySchema.safeParse({ ...base, chainId: 9000002 });
     expect(r.success).toBe(false);

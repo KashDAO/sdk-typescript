@@ -19,6 +19,7 @@ import type {
   QuoteMarketSummary,
   QuoteSellDetail,
 } from '../schemas/quote.js';
+import type { RedemptionResource } from '../schemas/redemption.js';
 import type { TraceResource } from '../schemas/trace.js';
 import type { TradeResource } from '../schemas/trade.js';
 import type { RedeliverWebhookEvent, WebhookEventResource } from '../schemas/webhook.js';
@@ -27,12 +28,19 @@ const ISO_FIXED = '2026-04-30T12:00:00.000Z';
 const MARKET_ID = '11111111-1111-4111-8111-111111111111';
 const TRADE_ID = '22222222-2222-4222-8222-222222222222';
 const CORRELATION_ID = '33333333-3333-4333-8333-333333333333';
+/** Kash's canonical chain since 2026-10-01, as the API names it. */
+const CHAIN_REF = 'solana:mainnet-beta';
+/** A base58 Solana market account — synthetic, but in the real alphabet. */
+const MARKET_ADDRESS = 'KashMarket11111111111111111111111111111111';
 
-/** Default {@link MarketResource} — a 2-outcome ACTIVE market. */
+/**
+ * Default {@link MarketResource} — a 2-outcome ACTIVE Solana mainnet market,
+ * in the API version `2026-08-19` shape: `chainRef`, and no `chainId`.
+ */
 export const DEFAULT_MARKET: MarketResource = {
   id: MARKET_ID,
-  contractAddress: '0x0000000000000000000000000000000000000001',
-  chainId: 8453,
+  contractAddress: MARKET_ADDRESS,
+  chainRef: CHAIN_REF,
   title: 'Will the price of ETH exceed $5,000 by year end?',
   description: 'Resolves YES if ETH closes above $5,000 on Dec 31.',
   status: 'ACTIVE',
@@ -78,6 +86,7 @@ export const DEFAULT_TRADE: TradeResource = {
   status: 'pending',
   correlationId: CORRELATION_ID,
   clientRequestId: null,
+  chainRef: CHAIN_REF,
   txHash: null,
   tokensOut: null,
   errorCode: null,
@@ -88,17 +97,20 @@ export const DEFAULT_TRADE: TradeResource = {
   updatedAt: ISO_FIXED,
 };
 
-/** Convenience — a {@link TradeResource} in the `completed` terminal state. */
+/**
+ * Convenience — a {@link TradeResource} in the `completed` terminal state.
+ * `txHash` stays `null`: the API publishes no transaction hash for a Solana
+ * trade on the trade resource.
+ */
 export const DEFAULT_COMPLETED_TRADE: TradeResource = {
   ...DEFAULT_TRADE,
   status: 'completed',
-  txHash: `0x${'b'.repeat(64)}`,
   tokensOut: '237340124711760000000',
 };
 
-/** Default {@link PortfolioSummary} — three active positions. */
+/** Default {@link PortfolioSummary} — three active positions held by a Solana wallet. */
 export const DEFAULT_PORTFOLIO_SUMMARY: PortfolioSummary = {
-  smartAccountAddress: '0x0000000000000000000000000000000000000abc',
+  smartAccountAddress: 'KashUser111111111111111111111111111111111111',
   activePositions: 3,
   totalCostBasisAtomic: '300000000',
 };
@@ -116,8 +128,8 @@ export const DEFAULT_POSITION: PositionResource = {
 
 const DEFAULT_QUOTE_MARKET_SUMMARY: QuoteMarketSummary = {
   id: MARKET_ID,
-  contractAddress: '0x0000000000000000000000000000000000000001',
-  chainId: 8453,
+  contractAddress: MARKET_ADDRESS,
+  chainRef: CHAIN_REF,
   outcomes: [
     { index: 0, label: 'Yes', probability: 0.42 },
     { index: 1, label: 'No', probability: 0.58 },
@@ -162,6 +174,16 @@ export const DEFAULT_QUOTE_BUY: Quote & QuoteBuyDetail = {
 export const DEFAULT_QUOTE_SELL: Quote & QuoteSellDetail = {
   ...DEFAULT_QUOTE_SELL_DETAIL,
   market: DEFAULT_QUOTE_MARKET_SUMMARY,
+};
+
+/** Default {@link RedemptionResource} — a pending redemption of the winning outcome 0. */
+export const DEFAULT_REDEMPTION: RedemptionResource = {
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  marketId: MARKET_ID,
+  outcomeIndex: 0,
+  kind: 'resolved',
+  sharesWad: '237340124711760000000',
+  status: 'pending',
 };
 
 /** Default {@link RedeliverWebhookEvent} — the result of an event redeliver. */
@@ -240,7 +262,8 @@ export const DEFAULT_TRACE: TraceResource = {
       sequenceNumber: 3,
       data: {
         tradeId: TRADE_ID,
-        txHash: `0x${'b'.repeat(64)}`,
+        txHash:
+          '3C7V6ugFiyv4Kq7VRWQHAA9qHcfGRosKP8WEyM9Lv2Uqa3SJkuT26t9YjhPzTKnvqZguVG3jjuUg2UHfqRKoLP97',
         tokensOut: '237340124711760000000',
       },
     },

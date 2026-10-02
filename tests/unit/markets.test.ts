@@ -201,7 +201,7 @@ describe('MarketsClient', () => {
   });
 });
 
-describe('MarketResourceSchema chain identity on the 0.1.x line', () => {
+describe('MarketResourceSchema is chain-neutral from 0.2.0 (2026-08-19 lane)', () => {
   /**
    * WHY THIS BLOCK EXISTS, and why widening was compulsory rather than a
    * nicety. `GET /v1/markets` was LEAKING the surrogate chain id — measured
@@ -236,16 +236,13 @@ describe('MarketResourceSchema chain identity on the 0.1.x line', () => {
     expect(MarketResourceSchema.safeParse({ ...base, chainId: 8453 }).success).toBe(true);
   });
 
-  it('keeps chainId REQUIRED, as 0.1.3 typed it: a market without one is refused', () => {
-    // 0.1.x is a patch line, so the type cannot loosen. The API version it pins
-    // (2026-04-29) never serves a market without a chainId; the 2026-08-19
-    // shape below is accepted from 0.2.0, which pins that version.
+  it('accepts a non-EVM market: chainRef present, chainId ABSENT', () => {
     const r = MarketResourceSchema.safeParse({
       ...base,
       contractAddress: 'zLoacSmkK6kAF4XQkNNgLdXYUZTXQ3KKhQuc9z4HP9Q',
       chainRef: 'solana:devnet',
     });
-    expect(r.success).toBe(false);
+    expect(r.success, JSON.stringify(r.success ? {} : r.error.issues)).toBe(true);
   });
 
   it('accepts an EVM market carrying BOTH, which 2026-08-19 returns', () => {
@@ -254,10 +251,12 @@ describe('MarketResourceSchema chain identity on the 0.1.x line', () => {
     ).toBe(true);
   });
 
-  it('refuses a surrogate chain id', () => {
+  it('STILL refuses a surrogate chain id, so the widening did not open that door', () => {
     /*
-     * The runtime guard added after 0.1.3: a surrogate id is refused even
-     * though it is a positive integer.
+     * The discriminating case, and the one that matters: `chainId` became
+     * OPTIONAL, not permissive. `.optional()` wrapping a refinement is exactly
+     * where the surrogate refusal could have been lost without any test going
+     * red, so this asserts the refinement survived.
      */
     expect(MarketResourceSchema.safeParse({ ...base, chainId: 9000002 }).success).toBe(false);
   });

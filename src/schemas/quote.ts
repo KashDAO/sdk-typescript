@@ -30,18 +30,25 @@ export const QuoteMarketSummarySchema = z.object({
   id: z.string().uuid(),
   contractAddress: z.string(),
   /**
-   * EVM chain id. **Required on the 0.1.x line**, exactly as 0.1.3 typed it.
-   * The API version this line pins (`2026-04-29`) refuses a non-EVM quote with
-   * 400 CHAIN_NOT_SUPPORTED, so every quote it returns carries one. 0.2.0 makes
-   * it optional, because `2026-08-19` serves Solana quotes without it.
+   * ABSENT for a non-EVM market, rather than carrying its surrogate.
+   *
+   * `publicChainIdSchema` refuses the internal Solana surrogate ids, so a
+   * Solana quote cannot publish this field at all and names its chain with
+   * {@link chainRef} instead. Optional rather than nullable because the key is
+   * omitted, not emptied.
+   *
+   * Optional from 0.2.0 (a required `number` through 0.1.5): 0.2.0 pins
+   * `2026-08-19`, under which a Solana quote omits it. Every EVM quote still
+   * carries it.
    */
-  chainId: publicChainIdSchema,
+  chainId: publicChainIdSchema.optional(),
   /**
    * Self-describing chain identity — `evm:8453`, `solana:devnet`.
    *
    * Sent by the API from version `2026-08-19` onward and absent on the
-   * version this release pins, so it is optional: the key is missing, not
-   * empty.
+   * canonical version, so it is optional here for the same reason `chainId`
+   * is: the key is missing, not empty. A `chainRef` needs no registry lookup
+   * and no surrogate, which is what lets it name a Solana market.
    */
   chainRef: z.string().optional(),
   outcomes: z.array(
