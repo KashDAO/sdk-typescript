@@ -56,6 +56,8 @@ export const DEFAULT_MARKET: MarketResource = {
   resolvedAt: null,
   resolution: null,
   resolutionState: null,
+  tradeable: true,
+  notTradeableReason: null,
 };
 
 /** Default {@link PredictionResource} — a 100-USDC buy on outcome 0. */
@@ -135,6 +137,8 @@ const DEFAULT_QUOTE_MARKET_SUMMARY: QuoteMarketSummary = {
     { index: 1, label: 'No', probability: 0.58 },
   ],
   status: 'ACTIVE',
+  tradeable: true,
+  notTradeableReason: null,
 };
 
 const DEFAULT_QUOTE_BUY_DETAIL: QuoteBuyDetail = {
@@ -176,7 +180,7 @@ export const DEFAULT_QUOTE_SELL: Quote & QuoteSellDetail = {
   market: DEFAULT_QUOTE_MARKET_SUMMARY,
 };
 
-/** Default {@link RedemptionResource} — a pending redemption of the winning outcome 0. */
+/** Default {@link RedemptionResource} — a pending redemption of the resolved outcome 0. */
 export const DEFAULT_REDEMPTION: RedemptionResource = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   marketId: MARKET_ID,

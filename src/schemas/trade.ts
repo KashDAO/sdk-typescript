@@ -77,6 +77,18 @@ export const TradeMetadataSchema = z
 
 export type TradeMetadata = z.infer<typeof TradeMetadataSchema>;
 
+/**
+ * Market Ambassadors share-link token (the `?amb=` query value). Mirrors the
+ * server-side `ambassadorTokenSchema`: 1-128 chars, `[A-Za-z0-9_-]` only.
+ */
+export const AmbassadorTokenSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, 'Allowed: letters, digits, _ -');
+
+export type AmbassadorToken = z.infer<typeof AmbassadorTokenSchema>;
+
 // -----------------------------------------------------------------
 // POST /v1/trades — create
 // -----------------------------------------------------------------
@@ -90,6 +102,12 @@ export const CreateTradeBodySchema = z
     clientRequestId: ClientRequestIdSchema.optional(),
     /** DX #1: customer-supplied tags echoed in the trade row + every webhook. */
     metadata: TradeMetadataSchema.optional(),
+    /**
+     * Market Ambassadors share-link token. Attributes the trade to the
+     * ambassador for revenue-share settlement. The API never refuses a trade
+     * over it: an unknown or expired token leaves the trade unattributed.
+     */
+    ambassadorToken: AmbassadorTokenSchema.optional(),
   })
   .strict();
 
@@ -105,8 +123,8 @@ export const TradeResourceSchema = z.object({
   correlationId: z.string().uuid(),
   clientRequestId: ClientRequestIdSchema.nullable(),
   /**
-   * Self-describing chain identity of the trade's market — `"evm:8453"`,
-   * `"solana:mainnet-beta"`.
+   * Self-describing chain identity of the trade's market — `"solana:mainnet-beta"`,
+   * or `"evm:8453"` on a historical Base trade.
    *
    * Sent from API version `2026-08-19` onward and ABSENT on earlier versions,
    * which is why it is optional rather than nullable: an older-version
@@ -118,10 +136,12 @@ export const TradeResourceSchema = z.object({
    * An EVM hash OR a base58 Solana signature. See the note on
    * `webhook-event.ts`; the alphabet is checked, the length deliberately not.
    *
-   * **`null` for every Solana trade, on every API version, even once
-   * `completed`.** The trade resource publishes only EVM transaction hashes
-   * today. The `trade.completed` webhook carries the real Solana signature, so
-   * a consumer that needs it should read it there.
+   * On API version `2026-08-19` (the version this SDK pins) a `completed`
+   * trade carries its chain's own id: the `0x` hash on EVM, the base58
+   * signature on Solana, with `chainRef` naming the family. On `2026-04-29`
+   * it is `null` for every Solana trade, because that version carries no
+   * chain identity. The `trade.completed` webhook carries the real id on
+   * every version.
    *
    * The response IS parsed through this schema, so the old `0x`-only pattern
    * was inert only because the API sends `null` here for Solana trades. It

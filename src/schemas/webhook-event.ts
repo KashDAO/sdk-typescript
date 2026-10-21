@@ -1,6 +1,6 @@
 /**
- * Webhook **event payload** schemas — the JSON body the
- * `apps/public-api-webhook-delivery-worker` POSTs to a customer's endpoint.
+ * Webhook **event payload** schemas — the JSON body the Kash webhook
+ * sender POSTs to a customer's endpoint.
  *
  * Distinct from the schemas in `webhook.ts`:
  *
@@ -9,9 +9,7 @@
  *   - This file covers the *delivery* surface — the body the customer
  *     receives + verifies + handles.
  *
- * Mirrors `apps/public-api/src/schemas/webhook-payloads.ts` exactly;
- * the API drift gate fails CI when either side moves without the
- * other.
+ * Mirrors the API's webhook payload contract exactly.
  *
  * Stripe pattern. Use {@link WebhookEventSchema} to parse + narrow:
  *
@@ -21,8 +19,8 @@
  *
  * const event = WebhookEventSchema.parse(JSON.parse(rawBody));
  * if (event.type === 'trade.completed') {
- *   // event.data.txHash — an EVM hash or a base58 Solana signature
- *   // event.data.chainRef — "evm:8453", "solana:mainnet-beta"
+ *   // event.data.txHash — the base58 Solana signature
+ *   // event.data.chainRef — "solana:mainnet-beta"
  * }
  * ```
  *
@@ -40,8 +38,8 @@ const tradeWebhookCommonSchema = z.object({
   tradeId: z.string().uuid(),
   marketId: z.string().uuid(),
   /**
-   * Self-describing chain identity of the trade's market — `"evm:8453"`,
-   * `"solana:mainnet-beta"`.
+   * Self-describing chain identity of the trade's market — `"solana:mainnet-beta"`,
+   * or `"evm:8453"` on an event for a historical Base trade.
    *
    * A webhook is pushed, so it carries no version header to negotiate with:
    * the server sends `chainRef` on every trade webhook whatever version the
@@ -124,7 +122,7 @@ export const TradeFailedPayloadSchema = tradeWebhookCommonSchema.extend({
 export type TradeFailedPayload = z.infer<typeof TradeFailedPayloadSchema>;
 
 /**
- * `trade.rejected` — risk engine declined the trade pre-execution.
+ * `trade.rejected` — the trade was declined before execution.
  *
  * Distinct from `trade.failed` (which covers on-chain/RPC failures
  * after submission). Rejection happens BEFORE the trade was ever
@@ -150,7 +148,7 @@ export type TradeRejectedPayload = z.infer<typeof TradeRejectedPayloadSchema>;
  * `event.type` narrows `event.data` to the matching payload.
  *
  * The envelope's `id` field is also returned in the `X-Kash-Event-Id`
- * header — dedupe on it to make repeated deliveries (and operator-
+ * header — dedupe on it to make repeated deliveries (and manually
  * triggered redeliveries) safe.
  */
 export const WebhookEventSchema = z.discriminatedUnion('type', [

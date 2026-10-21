@@ -28,7 +28,7 @@ Official TypeScript SDK for the [Kash](https://kash.bot) public API.
 - [Quickstart](#quickstart)
 - [Configuration](#configuration)
 - [API versioning](#api-versioning) — pinning behaviour to a specific dated server release
-- [Chains](#chains) — Solana first, Base while its markets resolve; `chainRef`
+- [Chains](#chains) — Solana; `chainRef`
 - [Resources](#resources)
   - [Markets](#markets)
   - [Quotes](#quotes)
@@ -72,7 +72,7 @@ A first trade in five steps. Total time: about 5 minutes.
 ### 1. Create a Kash account
 
 Sign up at **[https://app.kash.bot](https://app.kash.bot)**. The app walks
-you through wallet provisioning — a Privy-managed smart account is created
+you through wallet provisioning — an embedded wallet that you own is created
 automatically; you don't need to bring your own wallet.
 
 ### 2. Create an API key
@@ -174,13 +174,12 @@ Kash ships **two independent SDKs** for two different audiences. They
 have no shared package boundary — install whichever fits your use case
 (or both, if you need both).
 
-> **Every Kash SDK and the public API are non-custodial.** User funds
-> always sit in Privy-managed MPC smart accounts that the user
-> controls — Kash never holds keys, never custodies funds, never moves
-> value, and is not a money-services business. The split below is
-> about _who orchestrates execution_ (Kash backend vs. you), not
-> custody. See [SECURITY.md](./SECURITY.md) § Non-custodial design
-> for the full statement.
+> **Kash never holds custody of user funds.** Kash is an interface to a
+> decentralized, permissionless protocol on Solana, and users own their
+> wallets and assets. The split below is about _who submits the
+> transactions_ (Kash, through a permission you grant, vs. you with your
+> own signer), not custody. See [SECURITY.md](./SECURITY.md) §
+> Non-custodial design for the full statement.
 
 ### This package — `@kashdao/sdk` (Kash-orchestrated, API-wrapping)
 
@@ -193,30 +192,28 @@ const trade = await kash.trades.create({...});
 
 - **What it wraps**: the Kash public REST API (`api.kash.bot/v1/*`).
 - **Auth**: Kash API key (`kash_live_…` / `kash_test_…`) — a scoped,
-  revocable delegation the user issues against their own Privy-managed
-  smart account. Kash never sees signing keys; Privy MPC keeps them
-  with the user.
-- **Custody**: every state-changing on-chain action is signed by the
-  user's smart account inside Privy MPC. Kash never holds funds,
-  never moves funds, and never signs anything. See
+  revocable permission the user grants for their own wallet.
+- **Custody**: users own their wallets and assets, and Kash never holds
+  custody of user funds. Kash submits the transactions the user requests
+  through the permission the user grants, and the user can revoke it at
+  any time. See
   [SECURITY.md § Non-custodial design](./SECURITY.md#non-custodial-design)
   for the full statement.
 - **Dependencies**: just [Zod](https://zod.dev). No viem, no bundler
   client, no chain RPC required.
 - **Best for**: trading bots, dashboards, fintech integrations,
-  anywhere you want a single REST surface over the user's smart
-  account without running your own signer/RPC/bundler.
+  anywhere you want a single REST surface over the user's wallet
+  without running your own signer or RPC.
 
 ### Sibling package — [`@kashdao/protocol-sdk`](https://www.npmjs.com/package/@kashdao/protocol-sdk) (self-orchestrated, on-chain)
 
-A standalone package for talking directly to the Kash protocol contracts
-without going through the Kash API. Brings your own signer (HSM,
-Fireblocks, web3signer, viem account, browser wallet), your own RPC,
-your own bundler. Transactions never touch Kash servers. (Same
-non-custodial model as the wrapper above; the difference is the
-orchestration layer is yours, not Kash's.)
+A standalone package for talking directly to the Kash program on Solana
+without going through the Kash API. Bring your own signer (hardware
+wallet, KMS, browser wallet, or a local keypair) and your own RPC; you
+sign and submit every transaction yourself.
 
-- Install separately: `npm install @kashdao/protocol-sdk viem`.
+- Install separately:
+  `npm install @kashdao/protocol-sdk @solana/web3.js @coral-xyz/anchor @solana/spl-token bn.js`.
 - Best for: market makers, AI-agent runners, self-custody UIs, anyone
   building infra where Kash should not be in the latency or trust path.
 - See its [README](https://github.com/KashDAO/protocol-sdk-typescript#readme)
@@ -300,8 +297,8 @@ const { secret } = await kash.webhooks.rotateSecret();
 console.log('new secret (shown once):', secret);
 ```
 
-The previous secret is retained server-side for **7 days** for emergency
-rollback (operator-only, via `kash-admin`). It's NOT used for signing —
+The previous secret is retained briefly for emergency rollback and is
+never used for signing —
 deliveries are signed with the new secret immediately upon rotation.
 
 ### Revocation
@@ -325,11 +322,9 @@ Two parallel environments, distinguished by the API key prefix:
 | Markets         | Test markets only                 | Live markets only         |
 | Webhook secrets | `whsec_…` (separate from live)    | `whsec_…` (separate)      |
 
-¹ Solana has been Kash's canonical chain since 2026-10-01; every new market is
-created there. Markets created on Base before the cutover (Base Sepolia on
-test, Base mainnet on live) keep trading and resolving on Base and stay fully
-supported until they settle. Each market says which chain it is on in its
-`chainRef` — see [Chains](#chains).
+¹ Every Kash market trades on Solana. Base (EVM) is sunset: no Base market is
+open, and only historical records still name it. Each market says which chain
+it is on in its `chainRef` — see [Chains](#chains).
 
 ### Just give the SDK a key. It picks the right URL automatically.
 
@@ -495,6 +490,8 @@ new KashClient({
   hooks: {
     /* onRequest, onResponse, onRetry, onError — see Observability */
   },
+  conditionalRequests: true, // default; send If-None-Match, reuse the body on 304
+  conditionalCacheMaxEntries: 256, // default; distinct GET URLs remembered (LRU)
 });
 ```
 
@@ -556,8 +553,7 @@ const kash = new KashClient({ apiKey, apiVersion: '2026-01-01' });
 every market's chain with `chainRef`, and omits `chainId` for a Solana market.
 Pinning the older `2026-04-29` keeps the EVM-only behaviour — Solana markets are
 filtered out of `markets.list()` and `markets.get()` refuses them with
-`CHAIN_NOT_SUPPORTED` — so only do that if you trade residual Base markets
-exclusively. See [`MIGRATION-0.2.md`](./MIGRATION-0.2.md).
+`CHAIN_NOT_SUPPORTED` — so it cannot see any market that is open today. See [`MIGRATION-0.2.md`](./MIGRATION-0.2.md).
 
 The constant `SDK_API_VERSION` is exported so consumers can log it
 alongside their error reports:
@@ -578,12 +574,12 @@ To pick up newer server-side behaviour:
 **Server behaviour:** the public API reads the `X-Kash-Api-Version`
 request header (sent automatically by the SDK from your
 `apiVersion` config) and routes the request through a
-version-appropriate code path. Header absent → server uses its
-canonical `PUBLIC_API_VERSION`. Header present and recognised →
-request honours the pin. Header present but unrecognised → `410
-API_VERSION_UNSUPPORTED` with `metadata.supported` listing every
-accepted version. The server's canonical version is also emitted
-as the `X-API-Version` response header on every request — surfaced
+version-appropriate code path. Header absent → the server's default
+version, `2026-08-19` — the same version this SDK pins. Header present
+and recognised → request honours the pin. Header present but
+unrecognised → `410 API_VERSION_UNSUPPORTED` with `metadata.supported`
+listing every accepted version. The server also emits a version as
+the `X-API-Version` response header on every request — surfaced
 on the SDK's `onResponse` hook as `apiVersion` so you can detect
 server-side rollouts:
 
@@ -615,21 +611,20 @@ values at construction with `KashConfigurationError`.
 
 ## Chains
 
-**Solana is Kash's canonical chain** — production cut over on 2026-10-01, and
-every new market is created on Solana mainnet (staging: Solana devnet).
-**Base is still supported**: markets created on Base before the cutover keep
-trading and resolving there, and this SDK serves both side by side. You do not
-choose a chain per call; each market lives on one, and trades, quotes and
-redemptions route to it.
+**Every Kash market trades on Solana** — Solana mainnet in production, Solana
+devnet on staging. You do not choose a chain per call: each market lives on
+one, and trades, quotes and redemptions route to it. Base (EVM) is sunset; no
+Base market is open, but historical Base trades and markets are still returned
+and carry an `evm:` `chainRef`, so the SDK keeps parsing it.
 
 Every market, quote, trade and trade webhook names its chain with `chainRef`:
 
-| `chainRef`            | Chain                            |
-| --------------------- | -------------------------------- |
-| `solana:mainnet-beta` | Solana mainnet (live, canonical) |
-| `solana:devnet`       | Solana devnet (test, canonical)  |
-| `evm:8453`            | Base mainnet (live, pre-cutover) |
-| `evm:84532`           | Base Sepolia (test, pre-cutover) |
+| `chainRef`            | Chain                             |
+| --------------------- | --------------------------------- |
+| `solana:mainnet-beta` | Solana mainnet (live)             |
+| `solana:devnet`       | Solana devnet (test)              |
+| `evm:8453`            | Base mainnet (historical, sunset) |
+| `evm:84532`           | Base Sepolia (historical, sunset) |
 
 The wire field is a plain string, so a chain added later never makes a response
 fail to parse. For a typed view, parse it:
@@ -641,24 +636,26 @@ const market = await kash.markets.get(id);
 const chain = market.chainRef ? tryParseChainRef(market.chainRef) : undefined;
 if (chain?.type === 'solana') {
   console.log('Solana cluster', chain.cluster); // 'mainnet-beta'
-} else if (chain?.type === 'evm') {
-  console.log('EVM chain', chain.chainId); // 8453
 }
 
-parseChainRef('eip155:8453'); // CAIP-2 alias → { type: 'evm', chainId: 8453 }
-formatChainRef({ type: 'solana', cluster: 'devnet' }); // 'solana:devnet'
+parseChainRef('solana:devnet'); // { type: 'solana', cluster: 'devnet' }
+formatChainRef({ type: 'solana', cluster: 'mainnet-beta' }); // 'solana:mainnet-beta'
 ```
 
 `parseChainRef` throws `KashValidationError` on anything else;
 `tryParseChainRef` returns `undefined`.
 
-What differs on Solana:
+`evm:<chainId>` and its CAIP-2 alias `eip155:<chainId>` still parse, for
+historical Base records.
+
+What to expect on Solana:
 
 - **Addresses are base58.** `market.contractAddress` and
-  `portfolio.smartAccountAddress` may be base58 Solana addresses, not `0x` hex.
+  `portfolio.smartAccountAddress` are base58 Solana addresses, not `0x` hex.
 - **`chainId` is absent** on a Solana market or quote. Use `chainRef`.
-- **`trade.txHash` is `null`** for a Solana trade, even once `completed`. The
-  `trade.completed` webhook carries the base58 transaction signature.
+- **`trade.txHash` is the base58 transaction signature** on a `completed`
+  Solana trade, on API version `2026-08-19` (this SDK's default). On
+  `2026-04-29` it is `null` for a Solana trade.
 
 ## Resources
 
@@ -740,11 +737,12 @@ const trades = await kash.trades.list({ status: 'pending,completed', limit: 50 }
 const done = await kash.trades.waitForCompletion(id);
 ```
 
-**Solana trades.** `trade.txHash` is `null` for every Solana trade, even once
-`completed`: the trade resource publishes EVM hashes only. The
-`trade.completed` webhook carries the real base58 signature. `trade.chainRef`
-(`"solana:mainnet-beta"`, `"evm:8453"`) names the chain, on API version
-`2026-08-19` and later.
+**Solana trades.** On API version `2026-08-19` and later (this SDK's default),
+a `completed` trade's `txHash` is its base58 Solana transaction signature
+(a `0x` hash on a historical Base trade), and `trade.chainRef`
+(`"solana:mainnet-beta"`) names the chain. On `2026-04-29` `txHash` is `null` for a Solana
+trade, because that version carries no chain identity. The `trade.completed`
+webhook carries the real id on every version.
 
 #### Metadata
 
@@ -786,6 +784,27 @@ const result = TradeMetadataSchema.safeParse({ orderId: 'order_1' });
 if (!result.success) console.error(result.error.issues);
 ```
 
+#### Ambassador attribution
+
+A trade that came through a Market Ambassadors share link can carry the link's
+token (the `?amb=` value) as `ambassadorToken`. The API attributes the trade to
+that ambassador for revenue-share settlement. It never refuses a trade over the
+token: an unknown or expired one leaves the trade unattributed.
+
+```ts
+await kash.trades.create({
+  marketId,
+  outcomeIndex: 0,
+  amount: '100',
+  side: 'buy',
+  ambassadorToken: 'aZ9-x_2Kq',
+});
+```
+
+The token is 1–128 characters of `[A-Za-z0-9_-]`; the SDK checks that shape
+client-side with `AmbassadorTokenSchema` and throws `KashValidationError`
+before sending a malformed one.
+
 #### Type-narrowing helpers
 
 Avoid spelling status enum literals at every branch — use the typed
@@ -820,9 +839,9 @@ trade status — the `else` chain above never falls through.
 
 ### Redemptions
 
-When a market resolves (or is cancelled), winning tokens stay in your wallet
+When a market resolves (or is cancelled), your outcome tokens stay in your wallet
 until you redeem them — nothing claims them for you. One call redeems one
-(market, outcome) position, on Solana or Base:
+(market, outcome) position:
 
 ```ts
 const redemption = await kash.redemptions.create({ marketId, outcomeIndex: 0 });
@@ -843,7 +862,17 @@ support. The error message (the server's `detail`) says which case applies.
 ```ts
 const summary = await kash.portfolio.get();
 const positions = await kash.portfolio.positions({ marketId });
+
+// Watching for changes: yields now, then again only when positions change.
+for await (const positions of kash.portfolio.watchPositions({ signal })) {
+  rebalance(positions);
+}
 ```
+
+Do not poll `positions()` in a tight loop. Use `watchPositions`, or, if your
+positions only change through your own trades, the `trade.completed` webhook
+(see [Webhooks](#webhooks)) with one `positions()` call per event. See
+[Polling](#polling) for what each costs.
 
 `summary.smartAccountAddress` is the address holding your funds. For a user
 whose funds live on Solana it is a **base58 Solana wallet address**, not a
@@ -953,6 +982,43 @@ The helper refuses to poll a trade that is `pending_confirmation` — call
 `kash.trades.confirm(id, { token })` first with the token from the 202
 response of `trades.create()`.
 
+### Conditional requests
+
+Every GET this client makes is conditional once it has seen the URL. The SDK
+remembers each response's `ETag` and sends it back as `If-None-Match`; when
+nothing changed the server answers `304 Not Modified` with no body and the
+call resolves to the remembered value, re-validated against the schema and as
+a fresh object. You do not change any code to get this. Turn it off with
+`conditionalRequests: false`.
+
+On `GET /v1/portfolio/positions` the server answers the `304` from a one-row
+fingerprint, before it runs the positions query, so an unchanged poll is cheap
+for both sides. A `304` still counts toward your rate limit.
+
+### Watching positions
+
+```ts
+for await (const positions of kash.portfolio.watchPositions({
+  marketId, // optional
+  minIntervalMs: 5_000, // default; interval after a change (at least 1_000)
+  maxIntervalMs: 60_000, // default; ceiling while nothing changes
+  backoffFactor: 2, // default
+  signal: abortController.signal,
+})) {
+  rebalance(positions);
+}
+```
+
+It yields once immediately, then only when the positions change. While they
+stay the same the interval doubles up to `maxIntervalMs`, and it drops back to
+`minIntervalMs` after a change, so a quiet account costs about one request a
+minute. 429 and 5xx are retried as usual; an error that outlasts the retries
+ends the loop with the typed error.
+
+If positions only change through your own trades, a webhook is cheaper than
+any polling: subscribe to `trade.completed` and call `positions()` once per
+event.
+
 ## Errors
 
 Every failure throws a typed subclass of `KashError`. Branch on `instanceof`
@@ -994,7 +1060,7 @@ try {
 | `KashRateLimitError`        | 429, exposes `retryAfterSeconds`             | **true**      |
 | `KashValidationError`       | 400 / 422 + SDK-side schema mismatch         | false         |
 | `KashServerError`           | 5xx, optional `retryAfterSeconds`            | **true**      |
-| `KashMaintenanceError`      | 503 kill switch                              | **true**      |
+| `KashMaintenanceError`      | 503 maintenance                              | **true**      |
 | `KashTimeoutError`          | SDK timeout fired                            | **true**      |
 | `KashNetworkError`          | `fetch` threw (DNS, TLS, refused)            | **true**      |
 | `KashAbortedError`          | Caller aborted (`AbortSignal`)               | false         |
@@ -1023,7 +1089,7 @@ Every error carries:
 
 - `code` — stable, machine-readable string (e.g. `MARKET_NOT_TRADEABLE`)
 - `statusCode` — HTTP status (when applicable)
-- `requestId` — `X-Request-ID` from the response, for support tickets
+- `requestId` — `X-Request-ID` from the response, for support requests
 - `context: { method, path, attempt }` — the failing call + how many tries
 - `cause` — the underlying error, if any
 - `.toJSON()` — structured payload safe for production logs (no `cause`/`stack`)
@@ -1086,6 +1152,11 @@ new KashClient({
 After `maxRetries` is exhausted, the final error exposes
 `retryAfterSeconds` so application-level backoff can pick up where the SDK
 left off.
+
+Every request is checked against two limits, both set by your key's tier:
+one for your account (shared by all of your keys) and one for the key itself.
+The `X-RateLimit-*` headers, and `rateLimit` on the `onResponse` hook,
+describe whichever is closer to running out.
 
 ## Timeouts and aborts
 
@@ -1201,7 +1272,7 @@ branch (`event.data.metadata.strategy === 'momentum-v2'`) without
 re-fetching the trade.
 
 Dedupe on `event.id` (also returned in the `X-Kash-Event-Id` header)
-to make repeated deliveries safe — operator-triggered redeliveries
+to make repeated deliveries safe — manually triggered redeliveries
 reuse the same id.
 
 ### Lower-level: `verifySignature`
@@ -1210,7 +1281,7 @@ If you want to handle parsing yourself (e.g. you serialise the body
 into a queue for downstream processing and the schema parse happens
 elsewhere), use `verifySignature` directly:
 
-The webhook delivery worker signs payloads with `X-Kash-Signature`:
+Kash signs every webhook payload with `X-Kash-Signature`:
 
 ```
 X-Kash-Signature: t=1730000000000,v1=<hex-hmac-sha256>
@@ -1252,7 +1323,7 @@ app.post('/webhooks/kash', express.raw({ type: 'application/json' }), async (req
 > an empty key.
 
 Replays carry the same `X-Kash-Event-Id`; dedupe on that to make repeated
-deliveries (and operator-triggered redeliveries) safe.
+deliveries (and manually triggered redeliveries) safe.
 
 ## Troubleshooting
 
@@ -1321,7 +1392,7 @@ indicator. Wait for that, then retry.
 
 ### `KashConflictError: INSUFFICIENT_BALANCE`
 
-Your smart account doesn't have enough USDC to cover the trade. Top up via
+Your wallet doesn't have enough USDC to cover the trade. Top up via
 the on-ramp in the Kash app (production) or the test-USDC faucet (staging).
 
 ## Testing your integration
@@ -1482,7 +1553,7 @@ const tenantClient = kash.withConfig({
 ### Webhook handler with secret rotation
 
 Rotation publishes a new secret immediately. The previous one is retained
-for 7 days for emergency rollback (operator-only) — not used for signing.
+briefly for emergency rollback and is never used for signing.
 Store both values during the rollover and try them in order. This is
 one of the few cases where you want the lower-level `verifySignature`
 primitive instead of `constructEvent` — `constructEvent` throws on the
@@ -1581,8 +1652,8 @@ For full transparency on the v0.2 surface — the following capabilities exist
 on the Kash platform but are **not** wrapped by this SDK release. They're
 either accessible via the API directly or planned for a future version:
 
-- **Market disputes and competitions** — `/v1/markets/{id}/disputes` and
-  `/v1/competitions*` are served by the API but not yet wrapped as SDK methods.
+- **Market disputes** — `/v1/markets/{id}/disputes` is served by the API
+  but not yet wrapped as SDK methods.
 
 - **API key self-service** (`auth:manage` scope) — issue/list/revoke keys
   programmatically. Available today in the app under **Settings → API

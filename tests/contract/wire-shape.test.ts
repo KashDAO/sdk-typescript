@@ -96,6 +96,19 @@ export const FIXTURE_MARKET = {
   resolvedAt: null,
   resolution: null,
   resolutionState: null,
+  tradeable: true,
+  notTradeableReason: null,
+};
+
+/**
+ * A market cancelled on chain: `status` stays ACTIVE, and only `tradeable` /
+ * `notTradeableReason` say it will refuse a trade.
+ */
+export const FIXTURE_MARKET_CANCELLED = {
+  ...FIXTURE_MARKET,
+  id: '00000000-0000-0000-0000-000000000002',
+  tradeable: false,
+  notTradeableReason: 'cancelled' as const,
 };
 
 export const FIXTURE_TRADE = {
@@ -148,6 +161,8 @@ export const FIXTURE_QUOTE_MARKET_SUMMARY = {
     { index: 1, label: 'No', probability: 0.38 },
   ],
   status: 'ACTIVE' as const,
+  tradeable: true,
+  notTradeableReason: null,
 };
 
 export const FIXTURE_QUOTE_BUY = {
@@ -206,6 +221,7 @@ export const FIXTURE_TRACE_EVENT_EXECUTED = {
 export const FIXTURE_TRACE = {
   correlationId: '33333333-3333-3333-3333-333333333333',
   events: [FIXTURE_TRACE_EVENT_INTENT, FIXTURE_TRACE_EVENT_EXECUTED],
+  retention: { windowDays: 90, expired: false },
 };
 
 export const FIXTURE_PREDICTION = {
@@ -352,6 +368,28 @@ function formatErr(result: ReturnType<z.ZodType['safeParse']>): string {
 describe('wire-shape parity: SDK schemas accept canonical API responses', () => {
   it('MarketResource', () => {
     expectAccepts(MarketResourceSchema, FIXTURE_MARKET, 'MarketResource');
+  });
+
+  it('MarketResource keeps tradeable and notTradeableReason through the parse', () => {
+    // Zod strips undeclared keys, so before the SDK declared these fields a
+    // parsed market silently lost them.
+    const parsed = MarketResourceSchema.parse(FIXTURE_MARKET_CANCELLED);
+    expect(parsed.status).toBe('ACTIVE');
+    expect(parsed.tradeable).toBe(false);
+    expect(parsed.notTradeableReason).toBe('cancelled');
+  });
+
+  it('MarketResource from an API deployment older than tradeable still parses', () => {
+    const { tradeable: _t, notTradeableReason: _r, ...older } = FIXTURE_MARKET;
+    const parsed = MarketResourceSchema.parse(older);
+    expect('tradeable' in parsed).toBe(false);
+  });
+
+  it('MarketResource refuses a reason outside the published set', () => {
+    expect(
+      MarketResourceSchema.safeParse({ ...FIXTURE_MARKET_CANCELLED, notTradeableReason: 'paused' })
+        .success
+    ).toBe(false);
   });
 
   it('ListMarketsResponse', () => {

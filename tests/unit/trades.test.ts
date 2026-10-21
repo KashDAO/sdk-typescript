@@ -242,6 +242,52 @@ describe('TradesClient', () => {
     expect((init.headers as Record<string, string>)['Idempotency-Key']).toBe('idem-XYZ');
   });
 
+  it('create — sends ambassadorToken in the body when provided', async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(
+        {
+          trade: TRADE_BASE,
+          data: TRADE_BASE,
+          _meta: { requestId: 'r1', timestamp: '2026-04-30T12:00:00.000Z', idempotent: false },
+        },
+        { status: 201 }
+      )
+    );
+    const kash = makeKash(fetchSpy as typeof fetch);
+    await kash.trades.create({
+      marketId: TRADE_BASE.marketId,
+      outcomeIndex: 0,
+      amount: '100',
+      side: 'buy',
+      ambassadorToken: 'aZ9-x_2Kq',
+    });
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toMatchObject({ ambassadorToken: 'aZ9-x_2Kq' });
+  });
+
+  it.each([
+    ['empty', ''],
+    ['over 128 chars', 'a'.repeat(129)],
+    ['a character outside [A-Za-z0-9_-]', 'amb.token'],
+  ])('create — rejects an ambassadorToken that is %s before any request', async (_label, token) => {
+    const fetchSpy = vi.fn();
+    const kash = makeKash(fetchSpy as typeof fetch);
+    const err = await kash.trades
+      .create({
+        marketId: TRADE_BASE.marketId,
+        outcomeIndex: 0,
+        amount: '100',
+        side: 'buy',
+        ambassadorToken: token,
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KashValidationError);
+    const paths = (err as KashValidationError).issues.map((i) => i.path);
+    expect(paths.length).toBeGreaterThan(0);
+    expect(new Set(paths)).toEqual(new Set(['ambassadorToken']));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('create — flattens the 202 confirmation shape onto the trade', async () => {
     const t = { ...TRADE_BASE, status: 'pending_confirmation' as TradeStatus };
     const accepted = {

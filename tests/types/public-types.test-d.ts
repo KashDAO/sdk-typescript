@@ -146,6 +146,10 @@ describe('trade lifecycle types', () => {
     expectTypeOf<CreateTradeBody>().toHaveProperty('side');
   });
 
+  it('CreateTradeBody.ambassadorToken is an optional string', () => {
+    expectTypeOf<CreateTradeBody['ambassadorToken']>().toEqualTypeOf<string | undefined>();
+  });
+
   it('CreateTradeResponse is a discriminated union — narrows on confirmation', () => {
     type R = CreateTradeResponse;
     // Both arms are assignable to the union; the union is the public type.

@@ -11,11 +11,11 @@
  *   3. A simple constant is auditable — `git grep` finds it instantly.
  *
  * **Maintenance**: bumped in lockstep with `package.json#version` by
- * the release flow (`packages/sdk/scripts/publish.sh`). The unit test
+ * the release flow. The unit test
  * in `tests/unit/user-agent.test.ts` asserts the two stay in sync so
  * a forgotten bump fails CI.
  */
-export const SDK_VERSION = '0.2.1';
+export const SDK_VERSION = '0.3.2';
 
 /**
  * The Kash API version this SDK release was tested against. Sent as

@@ -13,6 +13,9 @@
  *   - Honour `Retry-After` on 429 (delta-seconds OR HTTP-date),
  *     bounded by `retryAfterMaxMs` — past the cap, the SDK surfaces
  *     the error rather than retrying too soon.
+ *   - Send `If-None-Match` on a GET whose URL it has an `ETag` for, and
+ *     resolve a `304 Not Modified` from the remembered body
+ *     (`conditionalRequests`).
  *   - Parse RFC 7807 problem responses and classify into typed errors.
  *   - Validate every 2xx body against the supplied Zod schema.
  *   - Fire lifecycle hooks (request / response / retry / error) so
@@ -35,6 +38,7 @@ import {
   type ProblemDetailsLike,
 } from '../errors.js';
 
+import { ConditionalCache, type ConditionalCacheEntry } from './conditional-cache.js';
 import { PRODUCTION_BASE_URL, STAGING_BASE_URL } from './config.js';
 import { sleepWithAbort } from './sleep.js';
 import { USER_AGENT } from './version.js';
@@ -129,6 +133,8 @@ export class KashHttpClient {
   private readonly hooks: KashClientHooks;
   private readonly customHeaders: Readonly<Record<string, string>>;
   private readonly apiVersion: string;
+  /** `null` when `conditionalRequests` is off. */
+  private readonly conditionalCache: ConditionalCache | null;
 
   constructor(config: KashClientConfig) {
     // Strip trailing slashes once so we can join with `/<path>`.
@@ -145,6 +151,9 @@ export class KashHttpClient {
     this.apiVersion = config.apiVersion;
     this.hooks = config.hooks ?? {};
     this.customHeaders = sanitizeCustomHeaders(config.headers);
+    this.conditionalCache = config.conditionalRequests
+      ? new ConditionalCache(config.conditionalCacheMaxEntries)
+      : null;
     // Late-bind to globalThis.fetch so consumers don't have to provide
     // it explicitly. Capturing here means a global polyfill installed
     // after the client is constructed won't take effect — that's the
@@ -194,18 +203,26 @@ export class KashHttpClient {
       ...(perCallHeaders ?? {}),
       Accept: 'application/json',
       'User-Agent': this.userAgent,
-      // Public-API contract version pin. The plugin at
-      // `apps/public-api/src/plugins/api-version.ts` reads this
+      // Public-API contract version pin. The API reads this
       // header lower-cased and routes the request through a
       // version-appropriate code path. Header absent (or empty
-      // value) → server defaults to the canonical
-      // `PUBLIC_API_VERSION`. The SDK always sends the value the
-      // consumer pinned via `apiVersion: '...'` at construction.
+      // value) → the server's default, `2026-08-19`
+      // (`DEFAULT_PUBLIC_API_VERSION`). The SDK always sends the value
+      // the consumer pinned via `apiVersion: '...'` at construction,
+      // `SDK_API_VERSION` unless overridden.
       'X-Kash-Api-Version': this.apiVersion,
     };
     if (this.apiKey) headers['X-API-Key'] = this.apiKey;
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
     if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+    // Conditional GET: only for a URL this client has an ETag for. Read once,
+    // outside the retry loop, so every attempt of one call revalidates the same
+    // remembered body.
+    const conditionalUrl =
+      opts.method === 'GET' && this.conditionalCache !== null ? url : undefined;
+    const remembered =
+      conditionalUrl === undefined ? undefined : this.conditionalCache?.get(conditionalUrl);
+    if (remembered !== undefined) headers['If-None-Match'] = remembered.etag;
 
     const init: RequestInit = {
       method: opts.method,
@@ -245,7 +262,15 @@ export class KashHttpClient {
       this.fireRequest(opts, url, attempt);
 
       try {
-        const result = await this.attempt<T>(url, init, opts.schema, timeoutMs, opts.signal);
+        const result = await this.attempt<T>(
+          url,
+          init,
+          opts.schema,
+          timeoutMs,
+          opts.signal,
+          conditionalUrl,
+          remembered
+        );
         this.fireResponse(
           opts,
           url,
@@ -256,7 +281,8 @@ export class KashHttpClient {
           result.rateLimit,
           result.apiVersion,
           result.idempotentReplay,
-          result.deprecation
+          result.deprecation,
+          result.notModified
         );
         return result.data;
       } catch (err) {
@@ -274,7 +300,8 @@ export class KashHttpClient {
           decorated.rateLimit ?? null,
           decorated.apiVersion,
           decorated.idempotentReplay ?? false,
-          decorated.deprecation ?? null
+          decorated.deprecation ?? null,
+          false
         );
 
         // Caller-driven aborts and other non-retryables stop here.
@@ -369,7 +396,8 @@ export class KashHttpClient {
     rateLimit: RateLimitState | null,
     apiVersion: string | undefined,
     idempotentReplay: boolean,
-    deprecation: ReturnType<typeof parseDeprecationHeaders>
+    deprecation: ReturnType<typeof parseDeprecationHeaders>,
+    notModified: boolean
   ): void {
     if (!this.hooks.onResponse) return;
     safeFire(this.hooks.onResponse, {
@@ -384,6 +412,7 @@ export class KashHttpClient {
       apiVersion,
       idempotentReplay,
       deprecation,
+      notModified,
     });
   }
 
@@ -429,7 +458,9 @@ export class KashHttpClient {
     init: RequestInit,
     schema: z.ZodType<T>,
     timeoutMs: number,
-    callerSignal: AbortSignal | undefined
+    callerSignal: AbortSignal | undefined,
+    conditionalUrl: string | undefined,
+    remembered: ConditionalCacheEntry | undefined
   ): Promise<{
     data: T;
     status: number;
@@ -438,6 +469,7 @@ export class KashHttpClient {
     apiVersion: string | undefined;
     idempotentReplay: boolean;
     deprecation: ReturnType<typeof parseDeprecationHeaders>;
+    notModified: boolean;
   }> {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(new TimeoutSentinel()), timeoutMs);
@@ -485,6 +517,20 @@ export class KashHttpClient {
       if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
     }
 
+    // 304 is not `response.ok`, so it must be handled before the error path.
+    if (response.status === 304) {
+      return {
+        data: fromNotModified(remembered, schema),
+        status: 304,
+        requestId: response.headers.get('x-request-id') ?? undefined,
+        rateLimit: parseRateLimitHeaders(response),
+        apiVersion: response.headers.get('x-api-version') ?? undefined,
+        idempotentReplay: false,
+        deprecation: parseDeprecationHeaders(response),
+        notModified: true,
+      };
+    }
+
     if (!response.ok) {
       throw await this.classifyResponse(response);
     }
@@ -514,6 +560,7 @@ export class KashHttpClient {
         apiVersion,
         idempotentReplay,
         deprecation,
+        notModified: false,
       };
     }
 
@@ -543,6 +590,7 @@ export class KashHttpClient {
         statusCode: response.status,
       });
     }
+    if (conditionalUrl !== undefined) this.remember(conditionalUrl, response, json);
     return {
       data: parsed.data,
       status,
@@ -551,7 +599,19 @@ export class KashHttpClient {
       apiVersion,
       idempotentReplay,
       deprecation,
+      notModified: false,
     };
+  }
+
+  /**
+   * Store (or forget) the body of a successful GET for revalidation. A
+   * response without an `ETag` forgets the URL: the remembered tag described a
+   * representation the server has since stopped validating.
+   */
+  private remember(url: string, response: Response, json: unknown): void {
+    const etag = response.headers.get('etag');
+    if (etag) this.conditionalCache?.set(url, { etag, body: json });
+    else this.conditionalCache?.delete(url);
   }
 
   private async classifyResponse(response: Response): Promise<KashError> {
@@ -639,7 +699,7 @@ export class KashHttpClient {
  * `remaining: 0` without context could be misread as "I'm rate-limited").
  *
  * The Kash API attaches all three on every response from a rate-limited
- * route — see `apps/public-api/src/plugins/rate-limit.ts`.
+ * route.
  *
  * **Header lookup case**: lowercase keys are intentional and match the
  * Fetch spec — `Headers.prototype.get` is case-insensitive (see
@@ -722,6 +782,34 @@ class TimeoutSentinel extends Error {
   }
 }
 
+/**
+ * The value for a `304`: the body remembered when the request was SENT, parsed
+ * afresh through the call's schema. Resolving from the entry captured before
+ * sending, not from a fresh cache lookup, means a concurrent eviction or a
+ * concurrent un-tagged 200 cannot turn a valid 304 into an error. A 304 with
+ * nothing remembered (one the SDK did not ask for) has nothing to resolve to
+ * and is an error, never an empty value.
+ */
+function fromNotModified<T>(
+  remembered: ConditionalCacheEntry | undefined,
+  schema: z.ZodType<T>
+): T {
+  if (remembered === undefined) {
+    throw new KashValidationError(
+      'Received 304 Not Modified for a request the SDK did not make conditional.',
+      { code: 'SDK_UNEXPECTED_NOT_MODIFIED', statusCode: 304 }
+    );
+  }
+  const parsed = schema.safeParse(remembered.body);
+  if (!parsed.success) {
+    throw new KashValidationError(
+      `Remembered response no longer matches the schema: ${formatZodIssue(parsed.error)}`,
+      { code: 'SDK_VALIDATION', statusCode: 304 }
+    );
+  }
+  return parsed.data;
+}
+
 function wrapUnknown(err: unknown): KashError {
   return new KashNetworkError(err instanceof Error ? err.message : String(err), {
     code: 'SDK_UNKNOWN',
@@ -764,7 +852,7 @@ function computeDelayMs(
 /**
  * Pull the parsed `Retry-After` (seconds) off the error if present.
  * Both `KashRateLimitError` (429) and `KashMaintenanceError` (503
- * kill switch) carry it.
+ * maintenance) carry it.
  */
 function retryAfterFromError(err: KashError): number | undefined {
   if (err instanceof KashRateLimitError) return err.retryAfterSeconds;
@@ -826,11 +914,13 @@ const SDK_RESERVED_HEADER_NAMES_LOWER = new Set([
   'content-type',
   'idempotency-key',
   'kash-version',
+  // Managed by the conditional-GET cache: a caller-supplied validator would
+  // produce a 304 the SDK has no remembered body for.
+  'if-none-match',
 ]);
 
 /**
- * Server-enforced `Idempotency-Key` constraints (mirror of
- * `apps/public-api/src/plugins/idempotency.ts`):
+ * Server-enforced `Idempotency-Key` constraints:
  *
  *   - Max 255 characters (`IDEMPOTENCY_KEY_TOO_LONG`).
  *   - Allowed alphabet `[A-Za-z0-9_\-:.]+` — letters, digits, underscore,

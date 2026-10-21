@@ -216,7 +216,7 @@ describe('classifyHttpError', () => {
     expect(err).not.toBeInstanceOf(KashMaintenanceError);
   });
 
-  it('503 ROUTE_DISABLED → KashMaintenanceError (per-route kill switch)', () => {
+  it('503 ROUTE_DISABLED → KashMaintenanceError (per-route maintenance)', () => {
     const err = classifyHttpError({
       status: 503,
       problem: { code: 'ROUTE_DISABLED', flag: 'api-trades-create' },

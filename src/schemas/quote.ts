@@ -19,6 +19,7 @@ import { z } from 'zod';
 
 import { publicChainIdSchema } from './_chain.js';
 import { MetaSchema } from './common.js';
+import { marketTradeabilityFields } from './market.js';
 
 const wadIntegerString = z.string().regex(/^\d+$/, 'Must be a non-negative integer string');
 const usdcIntegerString = z.string().regex(/^\d+$/, 'Must be a non-negative integer string');
@@ -43,10 +44,10 @@ export const QuoteMarketSummarySchema = z.object({
    */
   chainId: publicChainIdSchema.optional(),
   /**
-   * Self-describing chain identity — `evm:8453`, `solana:devnet`.
+   * Self-describing chain identity — `solana:mainnet-beta`, `solana:devnet`.
    *
    * Sent by the API from version `2026-08-19` onward and absent on the
-   * canonical version, so it is optional here for the same reason `chainId`
+   * older `2026-04-29`, so it is optional here for the same reason `chainId`
    * is: the key is missing, not empty. A `chainRef` needs no registry lookup
    * and no surrogate, which is what lets it name a Solana market.
    */
@@ -59,6 +60,12 @@ export const QuoteMarketSummarySchema = z.object({
     })
   ),
   status: z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']).nullable(),
+  /**
+   * See the market resource. A quote reads the curve, so it can answer for a
+   * market whose trade would be refused (resolved, frozen): `tradeable` says so
+   * without a second call.
+   */
+  ...marketTradeabilityFields,
 });
 
 export type QuoteMarketSummary = z.infer<typeof QuoteMarketSummarySchema>;

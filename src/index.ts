@@ -113,6 +113,7 @@ export {
   GetMarketResponseSchema,
   ListMarketsResponseSchema,
   ListPredictionsResponseSchema,
+  MarketNotTradeableReasonSchema,
   MarketOutcomeSchema,
   MarketResolutionStateSchema,
   MarketResourceSchema,
@@ -125,6 +126,7 @@ export type {
   ListMarketsResponse,
   ListPredictionsParams,
   ListPredictionsResponse,
+  MarketNotTradeableReason,
   MarketOutcome,
   MarketResolutionState,
   MarketResource,
@@ -133,6 +135,7 @@ export type {
 } from './schemas/market.js';
 
 export {
+  AmbassadorTokenSchema,
   ClientRequestIdSchema,
   ConfirmTradeBodySchema,
   ConfirmTradeResponseSchema,
@@ -150,6 +153,7 @@ export {
   UsdcAmountSchema,
 } from './schemas/trade.js';
 export type {
+  AmbassadorToken,
   ClientRequestId,
   ConfirmTradeBody,
   ConfirmTradeResponse,
@@ -185,12 +189,14 @@ export {
   TraceEventDataSchema,
   TraceEventSchema,
   TraceResourceSchema,
+  TraceRetentionSchema,
 } from './schemas/trace.js';
 export type {
   GetTraceResponse,
   TraceEvent,
   TraceEventData,
   TraceResource,
+  TraceRetention,
 } from './schemas/trace.js';
 
 export {
@@ -273,8 +279,8 @@ export type {
 } from './clients/trades.js';
 export { RedemptionsClient } from './clients/redemptions.js';
 export type { CreateRedemptionOptions, RedemptionCreateResult } from './clients/redemptions.js';
-export { PortfolioClient } from './clients/portfolio.js';
-export type { ListPositionsParams } from './clients/portfolio.js';
+export { PortfolioClient, WATCH_POSITIONS_DEFAULTS } from './clients/portfolio.js';
+export type { ListPositionsParams, WatchPositionsParams } from './clients/portfolio.js';
 export { AccountClient } from './clients/account.js';
 export { AccountUsageResponseSchema, AccountUsageSchema } from './schemas/account.js';
 export type { AccountUsage, AccountUsageResponse } from './schemas/account.js';
@@ -291,8 +297,7 @@ export type {
 
 // Self-orchestrated / direct-to-chain mode is intentionally NOT
 // re-exported here. It lives in its own package: `@kashdao/protocol-sdk`.
-// Both packages are non-custodial — user funds always live in
-// Privy-managed MPC smart accounts the user controls; Kash never holds
-// keys. The packages are split because the protocol-sdk path requires
-// viem + an RPC + a signer, and API-only consumers shouldn't pay that
-// dependency cost.
+// Kash never holds custody of user funds; users own their wallets and
+// assets. The packages are split because the protocol-sdk path requires
+// Solana client libraries + an RPC + a signer, and API-only consumers
+// shouldn't pay that dependency cost.

@@ -10,6 +10,89 @@ breaking changes are explicitly called out in the entry.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-10-20
+
+### Changed
+
+- Documentation and comment wording. No API or behaviour changes.
+
+## [0.3.1] — 2026-10-20
+
+### Changed
+
+- Documentation and wording updates in the README, SECURITY.md, code
+  comments and examples. No API or behaviour changes.
+- The client-side error message for an unsupported numeric `chainId` is
+  shorter and clearer.
+
+## [0.3.0] — 2026-10-20
+
+### Added
+
+- **`CreateTradeBody.ambassadorToken`** (optional): the Market Ambassadors
+  share-link token, which the API uses to attribute the trade for
+  revenue-share settlement. 1-128 characters of `[A-Za-z0-9_-]`, matching the
+  API's own schema; an unknown or expired token leaves the trade unattributed
+  rather than failing it. `AmbassadorTokenSchema` and `AmbassadorToken` are
+  exported.
+
+- **`MarketResource.tradeable` and `MarketResource.notTradeableReason`**, also
+  on the quote's `QuoteMarketSummary`. `tradeable` says whether the API would
+  accept a trade on the market right now, by the same rule that refuses one
+  with `409 MARKET_NOT_TRADEABLE`; `notTradeableReason` is `null` when it is
+  true, else `'resolved' | 'cancelled' | 'inactive' | 'frozen'`
+  (`MarketNotTradeableReasonSchema`, `MarketNotTradeableReason`, exported).
+  Use them instead of `status === 'ACTIVE'`: a market cancelled on chain or
+  past its freeze deadline keeps `status: 'ACTIVE'`. Both are optional in the
+  schema, so a response from an API deployment that predates them still
+  parses; absent means "not stated", not "tradeable".
+- **Conditional GETs, on by default.** The client remembers each GET
+  response's `ETag` and sends it back as `If-None-Match`; a `304 Not Modified`
+  resolves to the remembered value, re-validated against the schema and
+  returned as a fresh object. No code change is needed to benefit. New config:
+  `conditionalRequests` (default `true`) and `conditionalCacheMaxEntries`
+  (default `256`, LRU). The `onResponse` hook gains `notModified`, and reports
+  `status: 304` for a revalidated call. `If-None-Match` is now an SDK-managed
+  header: a caller-supplied value is dropped, as for `Idempotency-Key`.
+- **`portfolio.watchPositions(params?)`**: an async iterator that yields the
+  positions once, then only when they change, backing off from
+  `minIntervalMs` (5 s) to `maxIntervalMs` (60 s) while they do not.
+  `WATCH_POSITIONS_DEFAULTS` and `WatchPositionsParams` are exported.
+- `TraceResource.retention` (`TraceRetentionSchema`, `TraceRetention`):
+  `{ windowDays, expired }`. The API now deletes trace events once they are
+  90 to ~121 days old; `expired: true` means the trade predates the window, so
+  an empty or short `events` array means the events are no longer retained.
+  Optional in the schema so a response from an API deployment that predates
+  the field still parses.
+
+### Changed
+
+- A `304` the SDK did not ask for now throws `KashValidationError` with code
+  `SDK_UNEXPECTED_NOT_MODIFIED`. It previously surfaced as an unclassified
+  HTTP error.
+
+### Upgrading
+
+- Clients that poll `portfolio.positions()` should upgrade: an unchanged poll
+  becomes a body-less `304` that the API answers without running the
+  positions query. Moving the loop to `watchPositions` also cuts the request
+  count while nothing changes.
+
+### Documentation
+
+- The README and doc comments say the API's default version (used when no
+  `X-Kash-Api-Version` is sent) is `2026-08-19`, the version this SDK pins;
+  they previously named `2026-04-29`. No behaviour change: the SDK always
+  sends `SDK_API_VERSION` unless `apiVersion` overrides it.
+- Solana is the example chain throughout the README, the doc comments and the
+  examples. Base (EVM) is sunset: no Base market is open. `chainRef` values
+  such as `evm:8453` still parse, because historical Base trades and markets
+  are still returned.
+- `TradeResource.txHash` now carries the base58 signature of a `completed`
+  Solana trade on API version `2026-08-19`, which this SDK pins. The API
+  previously sent `null` there. The schema already accepted base58, so no
+  code changes. On `2026-04-29` a Solana trade still reads `null`.
+
 ## [0.2.1] - 2026-10-02
 
 **0.2.0 was tagged but never published to npm.** 0.2.1 is its first published
@@ -140,7 +223,7 @@ contained ships here, so this entry lists all of it.
   on them. Keeping the old type would keep that crash, so this is the one type
   change in a patch release. Handle `null` where you read `logIndex`.
 - Runtime guard: `chainId` on markets, quotes and trace events now refuses
-  Kash's internal Solana surrogate ids (9,000,000–9,999,999). The API no longer
+  internal chain identifiers that are not real EVM chain ids. The API no longer
   emits them on any version. The type is unchanged.
 
 ### Unchanged on purpose
@@ -237,7 +320,7 @@ Initial public release.
 ### Server-side behavior (no SDK code changes; documented for awareness)
 
 - The public API now returns `503 RATE_LIMIT_UNAVAILABLE` when the
-  rate-limit subsystem (Redis-backed) is momentarily unreachable
+  rate-limit service is momentarily unreachable
   AND the per-task circuit breaker is still closed. SDK consumers
   see this as a regular `KashServerError` with `err.code ===
 'RATE_LIMIT_UNAVAILABLE'`, `err.statusCode === 503`, and

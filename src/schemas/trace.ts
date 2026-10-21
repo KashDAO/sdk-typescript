@@ -72,9 +72,32 @@ export const TraceEventSchema = z.object({
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
 /** The trace resource itself. */
+/**
+ * How much of the timeline the server still holds. Events are kept for
+ * `windowDays` (90) and deleted after that; `expired` is true when the trade
+ * was created before the window, so `events` may be incomplete or empty
+ * because they were deleted, not because nothing happened. Mirrors
+ * `traceRetentionSchema` in the public-api.
+ */
+export const TraceRetentionSchema = z
+  .object({
+    /** Days every event is retained for. */
+    windowDays: z.number().int().positive(),
+    /** True when the trade predates the window and its events may have been deleted. */
+    expired: z.boolean(),
+  })
+  .strict();
+
+export type TraceRetention = z.infer<typeof TraceRetentionSchema>;
+
 export const TraceResourceSchema = z.object({
   correlationId: z.string().uuid(),
   events: z.array(TraceEventSchema),
+  /**
+   * Always sent by the API since 2026-10-08. Optional here so this SDK still
+   * parses a response from a deployment that predates it.
+   */
+  retention: TraceRetentionSchema.optional(),
 });
 
 export type TraceResource = z.infer<typeof TraceResourceSchema>;

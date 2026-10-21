@@ -2,16 +2,17 @@
  * Typed chain references.
  *
  * From API version `2026-08-19` every market, quote, trade and trade webhook
- * names its chain with a `chainRef` string — `"solana:mainnet-beta"`,
- * `"evm:8453"`. The wire field stays a plain `string` in the response schemas,
+ * names its chain with a `chainRef` string — `"solana:mainnet-beta"`, or
+ * `"evm:8453"` on a historical Base record. The wire field stays a plain `string` in the response schemas,
  * so a chain the server adds later never makes a response fail to parse. These
  * helpers are the opt-in typed view of that string.
  *
  * Two families, and the namespace says which:
  *
- *   - `solana:<cluster>` — `mainnet-beta` (Kash's canonical chain since
- *     2026-10-01), `devnet` (staging), `localnet`.
- *   - `evm:<chainId>` — the form the API sends. `eip155:<chainId>`, the CAIP-2
+ *   - `solana:<cluster>` — `mainnet-beta` (production), `devnet` (staging),
+ *     `localnet`. Every Kash market trades on Solana.
+ *   - `evm:<chainId>` — historical Base records (Base is sunset). The form the
+ *     API sends. `eip155:<chainId>`, the CAIP-2
  *     namespace for EVM chains, is accepted as an alias on input and parses to
  *     the same reference.
  *
@@ -23,7 +24,7 @@
  * const chain = market.chainRef ? parseChainRef(market.chainRef) : undefined;
  * if (chain?.type === 'solana') console.log('cluster', chain.cluster);
  *
- * formatChainRef({ type: 'evm', chainId: 8453 }); // 'evm:8453'
+ * formatChainRef({ type: 'solana', cluster: 'mainnet-beta' }); // 'solana:mainnet-beta'
  * ```
  */
 
@@ -101,7 +102,7 @@ export function parseChainRef(value: string): ChainRef {
   return parsed;
 }
 
-/** Render a chain reference in the form the API sends (`evm:8453`, `solana:mainnet-beta`). */
+/** Render a chain reference in the form the API sends (`solana:mainnet-beta`, `evm:8453`). */
 export function formatChainRef(ref: ChainRef): string {
   return ref.type === 'evm' ? `evm:${ref.chainId}` : `solana:${ref.cluster}`;
 }

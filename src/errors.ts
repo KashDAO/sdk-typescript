@@ -469,13 +469,12 @@ export class KashServerError extends KashError {
 }
 
 /**
- * 503 with a kill-switch code — `API_TRADE_PROCESSING_HALTED`
- * (global trade-processing pause) or `ROUTE_DISABLED` (per-route
- * kill switch via `flag` extension). Retryable but the consumer
- * should respect the `Retry-After` (typically 5 minutes for
- * trade-processing, 60s for route kill switches) and back off
+ * 503 with a maintenance code — `API_TRADE_PROCESSING_HALTED`
+ * (trading temporarily paused) or `ROUTE_DISABLED` (one route
+ * temporarily unavailable, named by the `flag` extension). Retryable
+ * but the consumer should respect the `Retry-After` and back off
  * generously. Distinct from `KashServerError` so consumers can
- * branch their alerting / fallback logic on the kill-switch class.
+ * branch their alerting / fallback logic on the maintenance class.
  */
 export class KashMaintenanceError extends KashError {
   override readonly isRetryable = true;
@@ -726,8 +725,8 @@ export function classifyHttpError(input: ClassifyHttpErrorInput): KashError {
     });
   }
 
-  // 503 — maintenance (kill switch) vs generic dependency unavailable.
-  // Both kill-switch codes (`API_TRADE_PROCESSING_HALTED`,
+  // 503 — maintenance vs generic dependency unavailable.
+  // Both maintenance codes (`API_TRADE_PROCESSING_HALTED`,
   // `ROUTE_DISABLED`) land in `KashMaintenanceError` so consumers can
   // branch on the class without needing to inspect `code`. The
   // per-route flag is on `err.extensions.flag` for `ROUTE_DISABLED`.

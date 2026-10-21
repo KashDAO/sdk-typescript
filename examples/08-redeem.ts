@@ -1,7 +1,7 @@
 /**
  * Redeem settled positions.
  *
- * When a market resolves (or is cancelled), winning tokens stay in your
+ * When a market resolves (or is cancelled), your outcome tokens stay in your
  * wallet until you redeem them. This walks your open positions, and for every
  * market that has settled, requests a redemption. Positions that cannot be
  * redeemed — a losing outcome, an unresolved market, an already-redeemed
@@ -9,7 +9,7 @@
  * code also means a previous redemption for that position FAILED and needs
  * support to clear it; the error message (the server's `detail`) says which.
  *
- * Works the same for Solana and Base markets. Requires `trades:write`.
+ * Requires `trades:write`.
  *
  * Run with:
  *   KASH_API_KEY=kash_test_… node --experimental-strip-types examples/08-redeem.ts

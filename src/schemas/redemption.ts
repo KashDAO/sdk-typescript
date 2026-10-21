@@ -4,7 +4,7 @@
  * Redeeming is how a settled position turns back into USDC. When a market
  * resolves (or is cancelled), the holder's outcome tokens stay where they are
  * until a redemption is requested; nothing claims them automatically. One
- * request redeems one (market, outcome) position, Base or Solana alike.
+ * request redeems one (market, outcome) position.
  */
 
 import { z } from 'zod';

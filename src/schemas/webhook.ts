@@ -54,12 +54,12 @@ export type RotateWebhookSecretResponse = z.infer<typeof RotateWebhookSecretResp
 
 /**
  * One row of the webhook-events feed served by `GET /v1/webhooks/events`
- * (DX6 — customer inspector). The `delivery` block carries the same
+ * (the customer webhook inspector). The `delivery` block carries the same
  * shape the SDK already exposes on a trade resource's `webhookDelivery`
  * field, so consumers can render either source through one component.
  *
  * `status` is a coarse derivation of the underlying delivery columns:
- *   - `none`       — outbox emit hasn't landed yet (orphan candidate)
+ *   - `none`       — the event has not been staged for delivery yet
  *   - `pending`    — staged, no attempt yet
  *   - `retrying`   — attempts > 0, no terminal failure, no success
  *   - `delivered`  — at least one attempt returned 2xx

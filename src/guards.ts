@@ -115,7 +115,7 @@ export function isFailedTrade(trade: TradeResource): trade is FailedTrade {
 
 /**
  * Trade reached `'rejected'` — the request did not enter the
- * pipeline (risk-engine reject, account state, market state). Read
+ * execution (account state, market state, request checks). Read
  * `errorCode` / `errorMessage`.
  */
 export function isRejectedTrade(trade: TradeResource): trade is RejectedTrade {

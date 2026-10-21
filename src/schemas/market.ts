@@ -32,6 +32,39 @@ export const MarketResolutionStateSchema = z.enum([
 ]);
 export type MarketResolutionState = z.infer<typeof MarketResolutionStateSchema>;
 
+/**
+ * Why a market does not accept trades right now, in the API's precedence
+ * order: `resolved` (the outcome is final), `cancelled` (cancelled on chain;
+ * positions are refundable through redemption), `inactive` (the status is not
+ * one that trades), `frozen` (the freeze deadline has passed).
+ */
+export const MarketNotTradeableReasonSchema = z.enum([
+  'resolved',
+  'cancelled',
+  'inactive',
+  'frozen',
+]);
+export type MarketNotTradeableReason = z.infer<typeof MarketNotTradeableReasonSchema>;
+
+/**
+ * `tradeable` and `notTradeableReason`, shared by the market resource and the
+ * quote's market summary.
+ *
+ * `tradeable` is the rule the API applies before refusing a trade with 409
+ * `MARKET_NOT_TRADEABLE`, evaluated when the response was produced. Read it
+ * rather than `status`, which stays `ACTIVE` for a cancelled or frozen market.
+ * `notTradeableReason` is null exactly when `tradeable` is true.
+ *
+ * Both are OPTIONAL for the same forward-compat reason as `freezeAt`: an API
+ * deployment older than the fields omits them, and requiring them would make
+ * every market read throw `KashValidationError` there. Absent means "not
+ * stated", never "tradeable".
+ */
+export const marketTradeabilityFields = {
+  tradeable: z.boolean().optional(),
+  notTradeableReason: MarketNotTradeableReasonSchema.nullable().optional(),
+} as const;
+
 export const MarketResourceSchema = z.object({
   id: z.string().uuid(),
   contractAddress: z.string(),
@@ -49,9 +82,9 @@ export const MarketResourceSchema = z.object({
    */
   chainId: publicChainIdSchema.optional(),
   /**
-   * Chain-neutral identifier (`evm:8453`, `solana:devnet`). Present from API
+   * Chain-neutral identifier (`solana:mainnet-beta`, `solana:devnet`). Present from API
    * version 2026-08-19 onward on every market, whatever its family. Optional
-   * for the same reason `chainId` is: on the canonical version the key is
+   * for the same reason `chainId` is: on the older `2026-04-29` the key is
    * missing, not empty.
    */
   chainRef: z.string().optional(),
@@ -91,6 +124,7 @@ export const MarketResourceSchema = z.object({
    * `freezeAt`: an API deployment older than the field omits the key.
    */
   resolutionState: MarketResolutionStateSchema.nullable().optional(),
+  ...marketTradeabilityFields,
 });
 
 export type MarketResource = z.infer<typeof MarketResourceSchema>;

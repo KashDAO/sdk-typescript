@@ -121,6 +121,13 @@ export type ResponseHookEvent = RequestHookEvent & {
    * {@link ServerDeprecationNotice}.
    */
   readonly deprecation: ServerDeprecationNotice | null;
+  /**
+   * `true` when the server answered `304 Not Modified` to the SDK's
+   * conditional request and the call resolved from the cached body (see
+   * `conditionalRequests`). `status` is `304` in that case. `false` for every
+   * response that carried a body.
+   */
+  readonly notModified: boolean;
 };
 
 export type RetryHookEvent = RequestHookEvent & {
@@ -285,6 +292,23 @@ export const kashClientConfigSchema = z.object({
   /** Lifecycle hooks for observability. See {@link KashClientHooks}. */
   hooks: z.custom<KashClientHooks>().optional(),
   /**
+   * Conditional GETs. When `true` (the default) the client remembers the
+   * `ETag` of each GET response and sends it back as `If-None-Match` on the
+   * next call to the same URL; a `304 Not Modified` then resolves from the
+   * remembered body — same value, no body on the wire, and (on routes that
+   * support it, such as `portfolio.positions()`) no list query on the server.
+   * The remembered bodies live in this client's memory only, are re-validated
+   * against the response schema on every reuse, and are never shared between
+   * clients. Set `false` to send every GET unconditionally.
+   */
+  conditionalRequests: z.boolean().default(true),
+  /**
+   * How many distinct GET URLs the conditional cache remembers, least
+   * recently used evicted first. Bounds memory for a client that walks many
+   * markets or pages.
+   */
+  conditionalCacheMaxEntries: z.number().int().min(1).max(10_000).default(256),
+  /**
    * The Kash API version this client targets — sent as the
    * `X-Kash-Api-Version` request header on every call. Format: `YYYY-MM-DD`
    * (ISO date).
@@ -298,13 +322,14 @@ export const kashClientConfigSchema = z.object({
    *
    * **Server behaviour:** the public API reads `X-Kash-Api-Version`
    * via the `api-version` plugin. Header absent (or empty) → request
-   * runs against the canonical `PUBLIC_API_VERSION` the server is
-   * deployed with; header present and recognised → request routes
-   * through that version's code path; header present but not
+   * runs against the server's default version, `2026-08-19`
+   * (`DEFAULT_PUBLIC_API_VERSION`), the same version this SDK sends as
+   * {@link SDK_API_VERSION}; header present and recognised → request
+   * routes through that version's code path; header present but not
    * supported → `410 API_VERSION_UNSUPPORTED` with the supported
-   * list in `metadata.supported`. The server's canonical version is
-   * always emitted as `X-API-Version` on the response (independent
-   * of the client pin). To detect server-side version rollouts,
+   * list in `metadata.supported`. The server also emits
+   * `X-API-Version` on every response (independent of the client
+   * pin). To detect server-side version rollouts,
    * subscribe to `onResponse` and compare the reported `apiVersion`
    * against your pinned {@link SDK_API_VERSION}.
    */
