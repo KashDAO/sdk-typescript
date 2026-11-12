@@ -10,7 +10,8 @@
 
 import { z } from 'zod';
 
-import { MetaSchema, PaginationSchema } from './common.js';
+import { openEnum } from './_open-enum.js';
+import { MetaSchema, PaginationSchema } from './envelope.js';
 
 /**
  * USDC amount as a human-readable decimal string. Mirrors the regex
@@ -32,7 +33,11 @@ export const ClientRequestIdSchema = z
 
 export type ClientRequestId = z.infer<typeof ClientRequestIdSchema>;
 
-export const TradeStatusSchema = z.enum([
+/**
+ * A trade's status. Open: a status the API adds later parses as its string,
+ * is never terminal for `waitForCompletion`, and matches no type guard.
+ */
+export const TradeStatusSchema = openEnum([
   'pending_confirmation',
   'pending',
   'validating',
@@ -50,7 +55,11 @@ export const TERMINAL_TRADE_STATUSES: readonly TradeStatus[] = [
   'rejected',
 ] as const;
 
-export const TradeSideSchema = z.enum(['buy', 'sell']);
+/** The two trade sides: one list for the closed request schema and the open resource field. */
+const TRADE_SIDES = ['buy', 'sell'] as const;
+
+/** A trade side in a request body: closed, so a typo fails client-side. */
+export const TradeSideSchema = z.enum(TRADE_SIDES);
 export type TradeSide = z.infer<typeof TradeSideSchema>;
 
 /**
@@ -95,7 +104,7 @@ export type AmbassadorToken = z.infer<typeof AmbassadorTokenSchema>;
 
 export const CreateTradeBodySchema = z
   .object({
-    marketId: z.string().uuid(),
+    marketId: z.guid(),
     outcomeIndex: z.number().int().nonnegative(),
     amount: UsdcAmountSchema,
     side: TradeSideSchema,
@@ -114,13 +123,14 @@ export const CreateTradeBodySchema = z
 export type CreateTradeBody = z.infer<typeof CreateTradeBodySchema>;
 
 export const TradeResourceSchema = z.object({
-  id: z.string().uuid(),
-  marketId: z.string().uuid(),
+  id: z.guid(),
+  marketId: z.guid(),
   outcomeIndex: z.number().int().nonnegative(),
   amount: UsdcAmountSchema,
-  side: TradeSideSchema,
+  /** Open on the resource; `TradeSideSchema` stays closed for request bodies. */
+  side: openEnum(TRADE_SIDES),
   status: TradeStatusSchema,
-  correlationId: z.string().uuid(),
+  correlationId: z.guid(),
   clientRequestId: ClientRequestIdSchema.nullable(),
   /**
    * Self-describing chain identity of the trade's market — `"solana:mainnet-beta"`,
@@ -172,11 +182,11 @@ export const TradeResourceSchema = z.object({
    */
   webhookDelivery: z
     .object({
-      status: z.enum(['none', 'pending', 'delivered', 'retrying', 'failed']),
+      status: openEnum(['none', 'pending', 'delivered', 'retrying', 'failed']),
       /** Total attempts (success + failure) so far. */
       attempts: z.number().int().nonnegative(),
       /** ISO 8601 timestamp of the most recent attempt; `null` if none. */
-      lastAttemptedAt: z.string().datetime().nullable(),
+      lastAttemptedAt: z.iso.datetime().nullable(),
       /** Last HTTP status from the customer endpoint; `null` on network errors. */
       lastStatusCode: z.number().int().nullable(),
       /**
@@ -187,7 +197,7 @@ export const TradeResourceSchema = z.object({
        */
       lastFailureCode: z.string().nullable(),
       /** ISO 8601 timestamp of terminal failure; `null` until terminal. */
-      terminalFailureAt: z.string().datetime().nullable(),
+      terminalFailureAt: z.iso.datetime().nullable(),
     })
     .nullable(),
   /**
@@ -199,8 +209,8 @@ export const TradeResourceSchema = z.object({
    * trust whatever the API returned.
    */
   metadata: z.record(z.string(), z.string()),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
 });
 
 export type TradeResource = z.infer<typeof TradeResourceSchema>;
@@ -226,7 +236,7 @@ export const CreateTradeAcceptedResponseSchema = z.object({
   data: TradeResourceSchema.optional(),
   confirmation: z.object({
     token: z.string().min(40).max(64),
-    expiresAt: z.string().datetime(),
+    expiresAt: z.iso.datetime(),
   }),
   _meta: MetaSchema.extend({ idempotent: z.boolean() }),
 });

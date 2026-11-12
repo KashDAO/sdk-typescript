@@ -38,6 +38,8 @@ Official TypeScript SDK for the [Kash](https://kash.bot) public API.
   - [Webhooks](#webhooks)
   - [Account](#account)
   - [Traces](#traces)
+  - [Balance](#balance)
+- [Partner integration](#partner-integration) — accounts for your users, acting for them, withdrawals
 - [Pagination](#pagination)
 - [Polling](#polling)
 - [Errors](#errors)
@@ -153,6 +155,18 @@ yarn add @kashdao/sdk
 bun add @kashdao/sdk
 ```
 
+### Entry points
+
+| Import from             | What it holds                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@kashdao/sdk`          | `KashClient`, errors and error codes, guards, chain references, and the types of markets, trades, quotes, portfolio, traces and webhooks |
+| `@kashdao/sdk/partner`  | Types of the partner surface: accounts, balances, withdrawals and their results (the methods are on `KashClient`)                        |
+| `@kashdao/sdk/schemas`  | Every Zod schema, for validating data yourself; the client already validates each response with them                                     |
+| `@kashdao/sdk/webhooks` | Partner webhook payload types and schemas                                                                                                |
+| `@kashdao/sdk/testing`  | A fixture-driven mock client and a test webhook signer                                                                                   |
+
+Most integrations import only from `@kashdao/sdk`.
+
 ### Pre-release / install from source
 
 If you're working from `main` before a tag is cut (e.g. trying a fix
@@ -254,15 +268,16 @@ endpoint for each operation; if your key lacks the scope, the request
 returns `403 INSUFFICIENT_SCOPE` and the SDK throws
 `KashAuthorizationError`.
 
-| Scope             | Unlocks                                                                                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markets:read`    | `kash.markets.list()`, `kash.markets.get()`, `kash.markets.predictions()`. Granted by default on every tier.                                                                          |
-| `markets:quote`   | `kash.quotes.buy()`, `kash.quotes.sell()`. Split from `markets:read` because quotes are RPC-heavy and customers may want to throttle quote traffic independently. Granted by default. |
-| `trades:read`     | `kash.trades.list()`, `kash.trades.get()`, `kash.traces.get()`.                                                                                                                       |
-| `trades:write`    | `kash.trades.create()`, `kash.trades.confirm()`, `kash.trades.waitForCompletion()`.                                                                                                   |
-| `portfolio:read`  | `kash.portfolio.get()`, `kash.portfolio.positions()`.                                                                                                                                 |
-| `webhooks:manage` | `kash.webhooks.list()`, `kash.webhooks.redeliver()`, `kash.webhooks.rotateSecret()`.                                                                                                  |
-| `auth:manage`     | `kash.account.usage()` plus API key self-service in the app (issue / list / revoke own keys — those operations aren't exposed in the SDK yet).                                        |
+| Scope              | Unlocks                                                                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markets:read`     | `kash.markets.list()`, `kash.markets.get()`, `kash.markets.predictions()`. Granted by default on every tier.                                                                          |
+| `markets:quote`    | `kash.quotes.buy()`, `kash.quotes.sell()`. Split from `markets:read` because quotes are RPC-heavy and customers may want to throttle quote traffic independently. Granted by default. |
+| `trades:read`      | `kash.trades.list()`, `kash.trades.get()`, `kash.traces.get()`.                                                                                                                       |
+| `trades:write`     | `kash.trades.create()`, `kash.trades.confirm()`, `kash.trades.waitForCompletion()`.                                                                                                   |
+| `portfolio:read`   | `kash.portfolio.get()`, `kash.portfolio.positions()`, `kash.balance.get()`.                                                                                                           |
+| `webhooks:manage`  | `kash.webhooks.list()`, `kash.webhooks.redeliver()`, `kash.webhooks.rotateSecret()`.                                                                                                  |
+| `auth:manage`      | `kash.account.usage()` plus API key self-service in the app (issue / list / revoke own keys — those operations aren't exposed in the SDK yet).                                        |
+| `partner:accounts` | Partner keys only: every `kash.partnerAccounts` method, its `withdrawals` included. See [Partner integration](#partner-integration).                                                  |
 
 > **`kash.healthCheck()` is the only fully public method** — no API
 > key required. Every other resource method authenticates via API key.
@@ -712,6 +727,11 @@ native bigint, so the API uses strings to round-trip losslessly. Cast to
 summary (id, contract, outcomes, status) so a single quote call gives
 you everything you need to render a trade preview.
 
+`effectivePrice` is in **raw units**: atomic USDC (6 decimals) per WAD token
+unit (18 decimals), so 0.42 USDC per token reads as about `4.2e-13`. Multiply
+by `1e12` for USDC per whole token (`buy.effectivePrice * 1e12`), or compute
+from the integer strings for exact math.
+
 The endpoint is **cached 10 seconds** server-side. Quote at the size you
 want to trade — slippage scales non-linearly with size, so don't extrapolate
 from a 1-USDC quote.
@@ -777,7 +797,7 @@ Constraints (enforced server-side; the SDK validates client-side via
 - Values: strings only, ≤ 500 chars
 
 ```ts
-import { TradeMetadataSchema } from '@kashdao/sdk';
+import { TradeMetadataSchema } from '@kashdao/sdk/schemas';
 
 // Validate before sending — surfaces a typed Zod issue rather than a 400.
 const result = TradeMetadataSchema.safeParse({ orderId: 'order_1' });
@@ -904,6 +924,24 @@ await kash.webhooks.redeliver(eventId);
 const { secret } = await kash.webhooks.rotateSecret();
 ```
 
+`constructEvent` returns the typed `WebhookEvent` union, or an
+`UnknownWebhookEvent` for a type newer than this SDK version (see
+[Event types the SDK does not know](#event-types-the-sdk-does-not-know)).
+After `isUnknownWebhookEvent(event)` is ruled out, a `switch` on `event.type`
+narrows each payload with no further import. To validate one payload on its
+own, import its schema from `@kashdao/sdk/schemas`. The trade payload types
+come from the root entry; the partner payloads and `trade.rejected`'s, types
+and schemas, also from the `webhooks` subpath:
+
+```ts
+import { TradeCompletedPayloadSchema } from '@kashdao/sdk/schemas';
+import {
+  TradeRejectedPayloadSchema,
+  WithdrawalFailedPayloadSchema,
+  type WithdrawalFailedPayload,
+} from '@kashdao/sdk/webhooks';
+```
+
 ### Account
 
 ```ts
@@ -939,6 +977,246 @@ Requires the `trades:read` scope. **404 covers both "unknown
 correlation id" AND "you don't own the trade behind it"** — the server
 collapses the two by design to prevent enumeration. Both surface as
 `KashNotFoundError`.
+
+### Balance
+
+```ts
+const balance = await kash.balance.get();
+console.log(balance.usdcAtomic); // on chain, USDC atomic units (6 decimals)
+console.log(balance.pendingWithdrawalsAtomic); // held by withdrawals not final yet
+console.log(balance.availableAtomic); // what a trade or a new withdrawal may spend
+```
+
+Requires the `portfolio:read` scope. Amounts are integer strings in USDC
+atomic units: `'25000000'` is 25 USDC. A balance the API cannot read
+throws `KashServerError` (`DEPENDENCY_UNAVAILABLE`); it is never reported
+as zero. A partner key passes `{ account }` (see below).
+
+## Partner integration
+
+A partner (an organisation with a partner API key and the
+`partner:accounts` scope) creates one Kash account for each user it
+onboards, then trades and withdraws for that user. The full guide,
+including what Kash checks and when, is the partner onboarding guide;
+this section is the SDK side of it.
+
+The methods below are on the client: `kash.partnerAccounts` (withdrawals on
+its `withdrawals` sub-client) and `kash.balance`. Their argument and result types
+come from `@kashdao/sdk/partner`, and their schemas from
+`@kashdao/sdk/schemas`:
+
+```ts
+import type { PartnerAccountResource, PartnerWithdrawalCreateResult } from '@kashdao/sdk/partner';
+```
+
+### Acting for an account
+
+A partner key has no user of its own. On the calls made for one user, pass
+that user's `accountId` as `account`; the SDK sends it as the `Kash-Account`
+header:
+
+```ts
+await kash.balance.get({ account: accountId });
+await kash.trades.create(body, { account: accountId, idempotencyKey });
+await kash.portfolio.positions({}, { account: accountId });
+```
+
+`account` is accepted by `balance`, `trades` (every method,
+`waitForCompletion` included), `portfolio` (including `watchPositions`),
+`redemptions` and `traces`. Markets and quotes act for no account, and the
+`partnerAccounts` methods name the account in the path, so those methods do
+not take `account`: the API would refuse the header with
+`400 ACCOUNT_HEADER_NOT_ALLOWED`, and the types stop it compiling. For the
+same reason there is no client-level default, and the SDK drops
+`Kash-Account` from `headers`. The SDK checks the value is a UUID before
+sending. A user key never passes `account`.
+
+Each account has its own rate limit of 60 requests a minute on these calls,
+on top of the per-key and per-partner limits.
+
+### End to end
+
+```ts
+import { randomUUID } from 'node:crypto';
+
+import {
+  KASH_ERROR_CODE,
+  KashClient,
+  KashConflictError,
+  isUnknownWebhookEvent,
+} from '@kashdao/sdk';
+
+const kash = new KashClient({ apiKey: process.env.KASH_API_KEY });
+
+// Idempotency keys: one per logical OPERATION, not per user. Create it when
+// you decide to do the thing, store it with that pending operation, and send
+// the same key on every retry of it. A key reused for a later, different
+// operation (a second onboarding after a release, a second withdrawal) gets
+// the first operation's answer back instead.
+const onboardingKey = `onboard-${randomUUID()}`; // saved with the user's pending onboarding
+
+// 1. Create the user's account when they opt in. A second create for the
+//    same externalId returns the existing account (outcome: 'existing').
+const { account, outcome } = await kash.partnerAccounts.create(
+  {
+    externalId: 'user-8841',
+    destination: { network: 'arc', address: '0x2c7536e3605d9c16a7a3d7b1898e529396a65c23' },
+    country: 'GB',
+    consent: { acceptedAt: '2026-11-07T09:57:00Z', termsVersion: 'kash-partner-2026-11' },
+  },
+  { idempotencyKey: onboardingKey }
+);
+const accountId = account.accountId;
+
+// 2. Wait until it is active (or handle the account.active webhook, step 6).
+//    Its depositAddress is where you send its USDC, on Solana.
+const active = await kash.partnerAccounts.waitUntilActive(accountId);
+console.log(outcome, active.depositAddress);
+
+// 3. Read what the account can spend, then trade for it. Note the units:
+//    balances are atomic, a trade amount is a USDC decimal string.
+const { availableAtomic } = await kash.balance.get({ account: accountId });
+const trade = await kash.trades.create(
+  { marketId, outcomeIndex: 0, amount: '10', side: 'buy' }, // 10 USDC
+  { account: accountId, idempotencyKey: `trade-${orderId}` }
+);
+await kash.trades.waitForCompletion(trade.id, { account: accountId });
+
+// 4. Quote a withdrawal to the user's registered destination, then send it.
+//    The key is required: create it for this withdrawal and reuse it on every
+//    retry, so a retry returns the same withdrawal (outcome: 'existing', or
+//    idempotentReplay: true when the server replays its stored answer)
+//    rather than sending a second one. The SDK itself retries a timed-out
+//    attempt with the same key, including when the server answers that the
+//    first attempt is still running (IDEMPOTENCY_REQUEST_IN_PROGRESS).
+const withdrawalKey = `withdraw-${randomUUID()}`; // saved with the pending withdrawal
+const quote = await kash.partnerAccounts.withdrawals.quote(accountId, {
+  amountAtomic: '2500000',
+});
+// Show the fee and the total debit to the user before they confirm.
+console.log(`fee up to ${quote.networkFeeAtomic}; ${quote.totalDebitAtomic} leaves the balance`);
+console.log(`at least ${quote.receiveAtomic} arrives; at most ${quote.maxAmountAtomic} now`);
+try {
+  const { withdrawal } = await kash.partnerAccounts.withdrawals.create(
+    accountId,
+    { amountAtomic: '2500000' },
+    { idempotencyKey: withdrawalKey }
+  );
+  const final = await kash.partnerAccounts.withdrawals.waitForCompletion(
+    accountId,
+    withdrawal.withdrawalId
+  );
+  console.log(final.status); // 'completed', 'failed' or 'cancelled'
+} catch (err) {
+  // Withdrawals are held for 24 hours after a destination change.
+  if (err instanceof KashConflictError && err.code === KASH_ERROR_CODE.WITHDRAWALS_HELD) {
+    scheduleRetry(err.retryAfterSeconds);
+  } else {
+    throw err;
+  }
+}
+
+// 5. Look an account up by your own id, e.g. after a crash mid-onboarding.
+const existing = await kash.partnerAccounts.findByExternalId('user-8841'); // or null
+
+// 6. Verify each webhook and act on it (see Partner webhooks below).
+const event = await kash.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret);
+if (isUnknownWebhookEvent(event)) {
+  // A type newer than this SDK version: acknowledge it, handle it later.
+} else if (event.type === 'withdrawal.completed') {
+  await settle(event.data.withdrawalId);
+}
+```
+
+Both partner creates return one shape (`PartnerCreateResult`): the resource
+under its own key, `{ account, outcome, idempotentReplay }` and
+`{ withdrawal, outcome, idempotentReplay }`.
+
+- `outcome`: `'created'` when this request created the resource (`202`);
+  `'existing'` when it already existed and was returned, nothing new made
+  (`200`): the account you already hold for that `externalId` (the body you
+  sent was not applied), or the withdrawal an earlier request with this key
+  made.
+- `idempotentReplay`: `true` exactly when the server replayed its stored
+  response for this `Idempotency-Key` (`Idempotent-Replay: true`). `outcome`
+  then reports what the original request did, and this call changed nothing.
+
+`trades.create` predates these and keeps its published flat shape: the trade's
+own fields plus `idempotent`, which is the server's `_meta.idempotent`: the
+same fact as `outcome: 'existing'` here.
+
+### Withdrawal fees
+
+Show `networkFeeAtomic` and `totalDebitAtomic` to the user before they
+confirm a withdrawal. On the quote, `networkFeeAtomic` is the most the
+network fee will cost (including creating the destination's USDC account on
+a first withdrawal to it; `networkFeeEstimated` says whether it is an upper
+bound), and `totalDebitAtomic` is what leaves the balance: the amount plus
+the fee when the fee is charged on top, the amount itself on a send-all. On
+the withdrawal, `networkFeeAtomic` is the fee actually charged, `null` until
+it is. All four fields are optional: an API release without fee disclosure
+omits them, so treat an absent value as "not disclosed", never as zero.
+
+### Amounts and units
+
+`trades.create` takes `amount` as a **USDC decimal string** (`'10'`,
+`'2.5'`, up to 6 decimal places). Balances, withdrawals, withdrawal quotes,
+buy quotes (`amountUsdcAtomic`) and the partner webhooks use **USDC atomic
+units**, an integer string with 6 implied decimals (`'2500000'` is 2.5 USDC).
+Convert with integer arithmetic, never floating point:
+
+```ts
+const toDecimal = (atomic: string) =>
+  `${BigInt(atomic) / 1_000_000n}.${(BigInt(atomic) % 1_000_000n).toString().padStart(6, '0')}`;
+await kash.trades.create(
+  { marketId, outcomeIndex: 0, amount: toDecimal(availableAtomic), side: 'buy' },
+  { account: accountId }
+);
+```
+
+### Managing accounts
+
+| Method                                                              | Does                                                                                    |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `kash.partnerAccounts.get(accountId)`                               | read one account                                                                        |
+| `kash.partnerAccounts.findByExternalId(externalId)`                 | the account for your id, or `null`                                                      |
+| `kash.partnerAccounts.list({ cursor, limit })`                      | your accounts, newest first, as a [`Page`](#pagination)                                 |
+| `kash.partnerAccounts.waitUntilActive(accountId)`                   | poll until active; rejects on `provisioning_failed`, `released`, `suspended` or timeout |
+| `kash.partnerAccounts.update(accountId, { destination })`           | change the destination (holds withdrawals 24 hours) or the `country`                    |
+| `kash.partnerAccounts.suspend(accountId)`                           | stop trading and withdrawals for an active account                                      |
+| `kash.partnerAccounts.reactivate(accountId)`                        | resume a suspended account                                                              |
+| `kash.partnerAccounts.release(accountId)`                           | end your link; refused while the account holds funds or work in flight                  |
+| `kash.partnerAccounts.withdrawals.get(accountId, id)`               | read one withdrawal                                                                     |
+| `kash.partnerAccounts.withdrawals.list(accountId)`                  | the account's withdrawals, newest first, as a `Page`                                    |
+| `kash.partnerAccounts.withdrawals.waitForCompletion(accountId, id)` | poll until `completed`, `failed` or `cancelled`                                         |
+
+Every amount is a string, never a number. Account and withdrawal ids, list
+`limit`s (1 to 100) and idempotency keys are checked before sending. Status
+and network values the SDK does not know yet (a new status, a new network)
+parse as their strings rather than failing, so give each `switch` a
+`default`.
+
+### Partner error codes
+
+Compare `err.code` with `KASH_ERROR_CODE` rather than a string literal:
+
+| `err.code`                          | Class                    | Means                                                                                                                                                                                              |
+| ----------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACCOUNT_NOT_ACTIVE`                | `KashConflictError`      | the account is provisioning, suspended or failed; `detail` says which                                                                                                                              |
+| `ACCOUNT_NOT_FOUND`                 | `KashNotFoundError`      | unknown, another partner's, or released                                                                                                                                                            |
+| `INSUFFICIENT_BALANCE`              | `KashConflictError`      | more than `availableAtomic` (to Arc, plus the network fee)                                                                                                                                         |
+| `WITHDRAWAL_BELOW_MINIMUM`          | `KashValidationError`    | under 1 USDC to Arc, or no more than the network fee                                                                                                                                               |
+| `WITHDRAWALS_HELD`                  | `KashConflictError`      | 24-hour hold after a destination change; see `retryAfterSeconds`                                                                                                                                   |
+| `DESTINATION_NOT_SUPPORTED`         | `KashValidationError`    | Kash cannot withdraw to that network here (422)                                                                                                                                                    |
+| `RELEASE_REQUIRES_EMPTY_ACCOUNT`    | `KashConflictError`      | withdraw everything and let work finish, then release                                                                                                                                              |
+| `IDEMPOTENCY_KEY_CONFLICT`          | `KashConflictError`      | the key was used with a different request                                                                                                                                                          |
+| `IDEMPOTENCY_REQUEST_IN_PROGRESS`   | `KashConflictError`      | an earlier attempt with this key is still running; the SDK retries it while that is safe. If it reaches you, read the withdrawal's or trade's state, then retry with the SAME key, never a new one |
+| `ACCOUNT_HEADER_NOT_ALLOWED`        | `KashValidationError`    | `account` sent where the route acts for no account, or by a user key                                                                                                                               |
+| `ACCOUNT_HEADER_REQUIRED`           | `KashValidationError`    | a partner key called an account-scoped method without `account`                                                                                                                                    |
+| `PARTNER_KEY_REQUIRES_IP_ALLOWLIST` | `KashAuthorizationError` | production partner keys need a specific IP allowlist                                                                                                                                               |
+| `RATE_LIMIT_EXCEEDED`               | `KashRateLimitError`     | see `retryAfterSeconds`                                                                                                                                                                            |
+| `ROUTE_DISABLED`                    | `KashMaintenanceError`   | the route is switched off for now                                                                                                                                                                  |
+| `DEPENDENCY_UNAVAILABLE`            | `KashServerError`        | something could not be read; nothing changed, so retry                                                                                                                                             |
 
 ## Pagination
 
@@ -1056,7 +1334,7 @@ try {
 | `KashAuthenticationError`   | 401 — bad / missing / revoked key            | false         |
 | `KashAuthorizationError`    | 403 — missing scope, IP not allowed          | false         |
 | `KashNotFoundError`         | 404                                          | false         |
-| `KashConflictError`         | 409 / 410 — idempotency, account state       | false         |
+| `KashConflictError`         | 409 / 410                                    | false         |
 | `KashRateLimitError`        | 429, exposes `retryAfterSeconds`             | **true**      |
 | `KashValidationError`       | 400 / 422 + SDK-side schema mismatch         | false         |
 | `KashServerError`           | 5xx, optional `retryAfterSeconds`            | **true**      |
@@ -1068,6 +1346,13 @@ try {
 | `KashWebhookSignatureError` | `webhooks.constructEvent` signature mismatch | false         |
 
 `isRetryable: true` errors only escape the SDK after `maxRetries` is exhausted.
+
+`err.code` is typed `KashErrorCode`: the codes named in `KASH_ERROR_CODE`
+autocomplete, and any other string still type-checks, because the API adds
+codes without an SDK release. Every `KashError` carries `retryAfterSeconds`:
+the server's `Retry-After` in seconds when it sent one, else `undefined`. So
+one read covers a rate limit, an outage and a hold; on `WITHDRAWALS_HELD` it
+is the time left on the 24-hour hold.
 
 ### Cross-realm `instanceof` safety
 
@@ -1091,18 +1376,22 @@ Every error carries:
 - `statusCode` — HTTP status (when applicable)
 - `requestId` — `X-Request-ID` from the response, for support requests
 - `context: { method, path, attempt }` — the failing call + how many tries
+- `clientRequestId` — on errors from `trades.create`, the id the call sent
+  (yours or the generated one), so you can repeat the call safely
 - `cause` — the underlying error, if any
 - `.toJSON()` — structured payload safe for production logs (no `cause`/`stack`)
 
 ## Idempotency
 
-Two independent mechanisms — pick one or both:
+Two independent mechanisms. The SDK fills in both for `trades.create` when
+you supply neither; supply your own to make them span more than one call:
 
 ```ts
 // Header-level — generic across all POST routes (24h TTL).
 await kash.trades.create(body, { idempotencyKey: crypto.randomUUID() });
 
-// Body-level — survives missing headers; tied to (user_id, client_request_id).
+// Body-level — checked in the database, with no time limit; unique per
+// (account, clientRequestId).
 await kash.trades.create({ ...body, clientRequestId: 'order-2026-04-30-001' });
 ```
 
@@ -1110,7 +1399,8 @@ Replays of the same idempotent request return the original response with
 `_meta.idempotent: true`. Replays with a different body return `409
 IDEMPOTENCY_KEY_CONFLICT` (or `409 CLIENT_REQUEST_ID_CONFLICT`). The SDK
 does **not** auto-retry these — they signal a logical conflict the caller
-must resolve.
+must resolve. The one exception is below: a `CLIENT_REQUEST_ID_CONFLICT` on
+an id the SDK generated.
 
 ### POSTs are auto-keyed
 
@@ -1130,6 +1420,59 @@ overwrites a key you passed.
 In the rare runtime with no `crypto` at all, no key can be generated; the SDK
 then sends the POST **once** and surfaces the error rather than repeating an
 unprotected write.
+
+### Trades are deduplicated in the database
+
+The key alone cannot always stop a second trade. The API holds a key's claim
+for 60 seconds, proceeds without one when it cannot record it, and releases it
+on any error response, including the 503 it sends when a trade was recorded but
+its event pipeline was down. A retry in any of those cases runs the trade route
+again.
+
+So `trades.create` also sends a `clientRequestId` when you supply none: one
+per call, the same on every retry of that call. The API checks it against a
+unique `(account, clientRequestId)` in the database, where the account is the
+one the trade acts for (`account` for a partner key), so a repeat of the call
+returns the trade it already recorded (`idempotent: true`) instead of placing
+another, at any age. Two `create()` calls always carry two ids, so two
+identical trades stay two trades. Your own `clientRequestId` always wins, and
+the generated one is on the result as `trade.clientRequestId`, and on any
+error `trades.create` throws as `err.clientRequestId`.
+
+So `idempotent: true` on a `create()` result does not only mean you sent a
+duplicate: when an earlier attempt of the same call recorded the trade and
+its response was lost, the SDK's retry returns that trade as a replay. Either
+way it is the one trade the call asked for.
+
+If a concurrent attempt of the same call recorded the trade first, the API
+answers the other from that recorded trade (`idempotent: true`): it answers
+`409 CLIENT_REQUEST_ID_CONFLICT` only when the body differs. Should an API
+answer such a race with the conflict anyway, for an id it generated the SDK
+knows the body is unchanged, sends the identical request once more and
+returns the recorded trade. For your own id it surfaces the conflict.
+
+There is no option to turn this off, and no reason to: the generated id is
+used only by the retries of the call that made it.
+
+A keyed request that times out on the client can still be running on the
+server, which then answers the retry with `409 IDEMPOTENCY_REQUEST_IN_PROGRESS`.
+The API holds its claim on the key for 60 seconds and renews it every 20
+seconds while the first request is still running, for up to 5 minutes, so a
+new request can take the key over only once the first has stopped. The SDK
+retries the answer with the same key (honouring the API's short
+`Retry-After`, at most 5 seconds) and never sends such a retry 45 seconds or
+more after the call's first send: the 60-second claim less a 15-second
+margin, which keeps it safe even against a claim that is not renewed. Each of
+its retries therefore gets either "still in progress" or the first attempt's
+stored result, never a second execution.
+
+When the conflict reaches you (the cutoff passed, the retry budget ran out,
+or an older API sent no `Retry-After`), the first request may still complete.
+For a withdrawal, read its state in `withdrawals.list` and, if it did not
+happen, retry with the SAME key, never a new one, which could act twice. For a
+trade, call `trades.create` again with the same body and the
+`err.clientRequestId` of the error (or your own id): the API returns the trade
+if the first request recorded it and places it if not. A request without a key is never retried on it.
 
 ## Rate limits & retries
 
@@ -1237,7 +1580,7 @@ parses the body into a typed, narrowable `WebhookEvent`:
 
 ```ts
 import express from 'express';
-import { KashClient, KashWebhookSignatureError } from '@kashdao/sdk';
+import { KashClient, KashWebhookSignatureError, isUnknownWebhookEvent } from '@kashdao/sdk';
 
 const kash = new KashClient({ apiKey: process.env.KASH_API_KEY! });
 
@@ -1248,7 +1591,9 @@ app.post('/webhooks/kash', express.raw({ type: 'application/json' }), async (req
       req.headers['x-kash-signature'] as string,
       process.env.KASH_WEBHOOK_SECRET!
     );
-    // event.type narrows event.data:
+    // A type newer than this SDK version: acknowledge it, handle it later.
+    if (isUnknownWebhookEvent(event)) return res.status(204).end();
+    // Past that check, event.type narrows event.data:
     if (event.type === 'trade.completed') {
       await markOrderShipped(event.data.tradeId, event.data.txHash);
     } else if (event.type === 'trade.failed') {
@@ -1274,6 +1619,79 @@ re-fetching the trade.
 Dedupe on `event.id` (also returned in the `X-Kash-Event-Id` header)
 to make repeated deliveries safe — manually triggered redeliveries
 reuse the same id.
+
+### Partner webhooks
+
+A partner key also receives the account, withdrawal and payout events of
+its organisation's accounts, and `constructEvent` parses them the same
+way. Each names the account by `accountId` (the value you pass as
+`account`, sent as `Kash-Account`) and by your own `externalId`. Amounts
+are USDC atomic units (6 decimals) as strings.
+
+| `event.type`                  | Sent when                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `account.active`              | the account is ready to fund; `data.depositAddress` is its Solana address |
+| `account.provisioning_failed` | the account could not be created; `data.reason` says why                  |
+| `account.destination_changed` | the withdrawal destination changed; withdrawals are held for 24 hours     |
+| `account.released`            | your link to the account ended; no further webhooks follow for it         |
+| `withdrawal.submitted`        | the withdrawal was accepted and queued for sending                        |
+| `withdrawal.completed`        | the USDC reached the destination                                          |
+| `withdrawal.failed`           | the withdrawal ended without delivering; see `data.errorCode`             |
+| `payout.completed`            | winnings from a resolved market were paid into the account                |
+
+```ts
+const event = await kash.webhooks.constructEvent(rawBody, header, secret);
+if (isUnknownWebhookEvent(event)) return; // a type newer than this SDK version
+switch (event.type) {
+  case 'account.active':
+    await markReady(event.data.externalId, event.data.depositAddress);
+    break;
+  case 'withdrawal.completed':
+    await settle(event.data.withdrawalId, event.data.destinationTransactionHash);
+    break;
+  case 'withdrawal.failed':
+    // 'withdrawal_failed': not sent. 'bridge_refunded': the bridge failed and
+    // the USDC is back in the account's Solana wallet. 'bridge_failed': it is not.
+    await reopen(event.data.withdrawalId, event.data.errorCode);
+    break;
+  default:
+    break;
+}
+```
+
+### Event types the SDK does not know
+
+A field the SDK does not declare is accepted and dropped, so a newer
+server adding a field never breaks parsing. The partner value sets (a
+provisioning failure `reason`, a destination `network`, a withdrawal
+`errorCode` and `status`) and the other response statuses are open: a value
+the SDK does not know yet parses as its string, so handle a `default`.
+
+An event `type` the SDK does not know does not throw either. After the
+signature verifies and the envelope checks out (`id`, `type`, `apiVersion`,
+`createdAt`), `constructEvent` returns an `UnknownWebhookEvent`:
+`{ known: false, id, type, apiVersion, createdAt, data }`, with `data`
+unparsed. Recognise it with `isUnknownWebhookEvent`, and handle unknown types
+in a default branch (acknowledge with `2xx`, log the type, upgrade the SDK
+when you want them typed):
+
+```ts
+import { isUnknownWebhookEvent } from '@kashdao/sdk';
+
+const event = await kash.webhooks.constructEvent(rawBody, header, secret);
+if (isUnknownWebhookEvent(event)) {
+  log.info('webhook type not handled yet', { type: event.type, id: event.id });
+  return;
+}
+switch (
+  event.type
+  // every known type; after the guard this switch can be exhaustive
+) {
+}
+```
+
+A KNOWN type that does not match its own shape is still refused with
+`KashValidationError`: that is a broken delivery, not a newer one.
 
 ### Lower-level: `verifySignature`
 
@@ -1381,8 +1799,15 @@ because the env var wasn't set.
 ### Trades stuck in `pending_confirmation`
 
 The trade hit the high-value confirmation gate. Capture the `confirmation.token`
-from the 202 response and call `kash.trades.confirm(id, { token })`.
-`waitForCompletion` refuses to poll until you do.
+from the result and call `kash.trades.confirm(id, { token })`.
+`waitForCompletion` refuses to poll until you do. If you no longer have the
+token, call `trades.create` again with the same body and `clientRequestId`
+(the result's `clientRequestId`) from the same API key before
+`confirmation.expiresAt`: the result carries a new token and the earlier one
+stops working. `trades.create` does this itself when its own first answer
+was lost. If that recovery request itself fails, `trades.create` throws even
+though the trade is held; the error carries `err.clientRequestId`, so
+repeating the call with it returns the trade with a new token.
 
 ### `KashConflictError: SMART_ACCOUNT_NOT_PROVISIONED`
 
@@ -1437,9 +1862,25 @@ const kash = createMockKashClient({
 });
 ```
 
-The mock is structurally compatible with `KashClient` — your code under
-test takes a `KashClient`-shaped dependency and the mock plugs in
-without any cast. Imports come from the `testing` subpath only, so
+The mock's methods are the real client's, picked by name, so they take
+the same parameters (options and `account` included) and apply the same
+client-side checks (bodies, UUID ids and `account`, idempotency keys, list
+limits); override handlers receive the options too. `watchPositions`
+is the one method not mocked. Your code under test takes a
+`KashClient`-shaped dependency and the mock plugs in without any cast.
+
+To unit-test a webhook receiver, sign a body the way Kash does:
+
+```ts
+import { generateTestWebhookSignature } from '@kashdao/sdk/testing';
+
+const payload = JSON.stringify(event);
+const signature = await generateTestWebhookSignature({ payload, secret: 'whsec_test' });
+await request(app).post('/webhooks/kash').set('X-Kash-Signature', signature).send(payload);
+```
+
+It returns `t=<unix-ms>,v1=<hex>` for the current time, or `timestampMs` if
+given (a stale one tests your replay check). Imports come from the `testing` subpath only, so
 production bundles never pull in fixtures or factory code.
 
 ## Recipes
@@ -1513,7 +1954,9 @@ if (isCompletedTrade(done)) console.log('tx:', done.txHash);
 
 A `409 IDEMPOTENCY_KEY_CONFLICT` means _the same key was reused with a
 different body_. Don't retry — fix the caller. A `409 CLIENT_REQUEST_ID_CONFLICT`
-means the same client-request-id was reused; same rule.
+means the same `clientRequestId` was reused with a different body (market,
+outcome, side, amount or metadata); same rule. Its `detail` names the trade the
+id already belongs to.
 
 ```ts
 try {
@@ -1640,7 +2083,9 @@ try {
     // Server signalled an outage — back off and retry the get.
   }
   if (err instanceof KashConflictError && err.code === 'TRADE_NOT_AWAITING_CONFIRMATION') {
-    // You called waitForCompletion on a trade still at pending_confirmation.
+    // waitForCompletion refuses a trade that IS awaiting confirmation
+    // (pending_confirmation); the code's name predates this use. Confirm it
+    // with trades.confirm(id, { token }), then wait.
   }
   throw err;
 }
@@ -1648,7 +2093,7 @@ try {
 
 ## What's NOT in this SDK yet
 
-For full transparency on the v0.2 surface — the following capabilities exist
+For full transparency on this release's surface — the following capabilities exist
 on the Kash platform but are **not** wrapped by this SDK release. They're
 either accessible via the API directly or planned for a future version:
 
@@ -1690,15 +2135,20 @@ Every release is gated by [`size-limit`](https://github.com/ai/size-limit),
 which measures each entry the way your bundler ships it — minified, then
 brotli-compressed:
 
-| Entry                  | Cap   |
-| ---------------------- | ----- |
-| `@kashdao/sdk`         | 24 KB |
-| `@kashdao/sdk/testing` | 8 KB  |
+| Entry                   | Cap   |
+| ----------------------- | ----- |
+| `@kashdao/sdk`          | 24 KB |
+| `@kashdao/sdk/partner`  | 1 KB  |
+| `@kashdao/sdk/schemas`  | 5 KB  |
+| `@kashdao/sdk/testing`  | 8 KB  |
+| `@kashdao/sdk/webhooks` | 5 KB  |
 
 Verify locally with `pnpm build && pnpm size`.
 
-Zod is the only runtime dependency; it is **not** bundled (it's a peer
-dependency-style external).
+Zod 4 (`^4.6.6`) is the only runtime dependency; it is **not** bundled into
+the SDK (it's a peer dependency-style external), and the sizes above exclude
+it. A browser or edge bundle that includes it measured about 88.6 kB brotli
+for the main entry with zod 4, against 26.3 kB with zod 3.
 
 ## Versioning
 

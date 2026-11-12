@@ -16,40 +16,43 @@
 import { z } from 'zod';
 
 import { publicChainIdSchema } from './_chain.js';
-import { MetaSchema } from './common.js';
+import { openEnum } from './_open-enum.js';
+import { MetaSchema } from './envelope.js';
 
 /**
  * Curated, sanitized subset of the originating event payload. Every
  * field is optional — only the fields the originating event actually
  * produced are present. Mirrors `traceEventDataSchema` in the
  * public-api.
+ *
+ * Not `.strict()`: this is a RESPONSE schema, so a field the server adds to
+ * a trace event is stripped rather than failing the whole `traces.get()`
+ * response, as on every other response schema in this package.
  */
-export const TraceEventDataSchema = z
-  .object({
-    /** UUID of the trade this event belongs to (most events). */
-    tradeId: z.string().uuid().optional(),
-    /** Market UUID the trade targets (most events). */
-    marketId: z.string().uuid().optional(),
-    /** Outcome index (0..N-1). */
-    outcomeIndex: z.number().int().nonnegative().optional(),
-    /** `buy` | `sell`. */
-    side: z.enum(['buy', 'sell']).optional(),
-    /** Human USDC decimal amount. */
-    amount: z.string().optional(),
-    /** Source-chain id when the event involves a chain-specific op. */
-    chainId: publicChainIdSchema.optional(),
-    /** On-chain tx hash (executed/funding/bridge events). */
-    txHash: z.string().optional(),
-    /** Outcome tokens received (executed events). */
-    tokensOut: z.string().optional(),
-    /** Failure code (failed/rejected events). */
-    errorCode: z.string().optional(),
-    /** Failure message (failed/rejected events). */
-    errorMessage: z.string().optional(),
-    /** Free-text reason (rejected/compensated events). */
-    reason: z.string().optional(),
-  })
-  .strict();
+export const TraceEventDataSchema = z.object({
+  /** UUID of the trade this event belongs to (most events). */
+  tradeId: z.guid().optional(),
+  /** Market UUID the trade targets (most events). */
+  marketId: z.guid().optional(),
+  /** Outcome index (0..N-1). */
+  outcomeIndex: z.number().int().nonnegative().optional(),
+  /** `buy` | `sell`. */
+  side: openEnum(['buy', 'sell']).optional(),
+  /** Human USDC decimal amount. */
+  amount: z.string().optional(),
+  /** Source-chain id when the event involves a chain-specific op. */
+  chainId: publicChainIdSchema.optional(),
+  /** On-chain tx hash (executed/funding/bridge events). */
+  txHash: z.string().optional(),
+  /** Outcome tokens received (executed events). */
+  tokensOut: z.string().optional(),
+  /** Failure code (failed/rejected events). */
+  errorCode: z.string().optional(),
+  /** Failure message (failed/rejected events). */
+  errorMessage: z.string().optional(),
+  /** Free-text reason (rejected/compensated events). */
+  reason: z.string().optional(),
+});
 
 export type TraceEventData = z.infer<typeof TraceEventDataSchema>;
 
@@ -62,7 +65,7 @@ export const TraceEventSchema = z.object({
   /** CloudEvents v1.0 type — e.g. `com.kash.trade.executed.v1`. */
   type: z.string().min(1),
   /** ISO-8601 timestamp the event was appended to the store. */
-  occurredAt: z.string().datetime(),
+  occurredAt: z.iso.datetime(),
   /** Per-aggregate ordering within the same correlation. */
   sequenceNumber: z.number().int().nonnegative(),
   /** Curated, sanitized subset of the original event payload. */
@@ -77,21 +80,20 @@ export type TraceEvent = z.infer<typeof TraceEventSchema>;
  * `windowDays` (90) and deleted after that; `expired` is true when the trade
  * was created before the window, so `events` may be incomplete or empty
  * because they were deleted, not because nothing happened. Mirrors
- * `traceRetentionSchema` in the public-api.
+ * `traceRetentionSchema` in the public-api. Not `.strict()`, for the same
+ * reason as {@link TraceEventDataSchema}.
  */
-export const TraceRetentionSchema = z
-  .object({
-    /** Days every event is retained for. */
-    windowDays: z.number().int().positive(),
-    /** True when the trade predates the window and its events may have been deleted. */
-    expired: z.boolean(),
-  })
-  .strict();
+export const TraceRetentionSchema = z.object({
+  /** Days every event is retained for. */
+  windowDays: z.number().int().positive(),
+  /** True when the trade predates the window and its events may have been deleted. */
+  expired: z.boolean(),
+});
 
 export type TraceRetention = z.infer<typeof TraceRetentionSchema>;
 
 export const TraceResourceSchema = z.object({
-  correlationId: z.string().uuid(),
+  correlationId: z.guid(),
   events: z.array(TraceEventSchema),
   /**
    * Always sent by the API since 2026-10-08. Optional here so this SDK still

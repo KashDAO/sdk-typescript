@@ -60,7 +60,25 @@ import {
   KashValidationError,
   KashWebhookSignatureError,
 } from '../errors.js';
+import { validateIdempotencyKey } from '../internal/idempotency-key.js';
 import { Page } from '../internal/pagination.js';
+import { parseRequestBody, requireIdempotencyKey } from '../internal/request-body.js';
+import { pageLimit, validateUuid } from '../internal/request-options.js';
+import { parseWebhookEvent } from '../internal/webhook-event-parse.js';
+import {
+  CreatePartnerAccountBodySchema,
+  PartnerExternalIdSchema,
+  UpdatePartnerAccountBodySchema,
+  type CreatePartnerAccountBody,
+  type PartnerAccountResource,
+  type UpdatePartnerAccountBody,
+} from '../schemas/partner-account.js';
+import {
+  CreatePartnerWithdrawalBodySchema,
+  type CreatePartnerWithdrawalBody,
+  type PartnerWithdrawalQuote,
+  type PartnerWithdrawalResource,
+} from '../schemas/partner-withdrawal.js';
 import { CreateRedemptionBodySchema, type CreateRedemptionBody } from '../schemas/redemption.js';
 import {
   CreateTradeBodySchema,
@@ -68,12 +86,15 @@ import {
   type ListTradesParams,
   type TradeResource,
 } from '../schemas/trade.js';
-import { WebhookEventSchema, type WebhookEvent } from '../schemas/webhook-event.js';
 
 import {
   DEFAULT_ACCOUNT_USAGE,
+  DEFAULT_BALANCE,
   DEFAULT_COMPLETED_TRADE,
   DEFAULT_MARKET,
+  DEFAULT_PARTNER_ACCOUNT,
+  DEFAULT_PARTNER_WITHDRAWAL,
+  DEFAULT_PARTNER_WITHDRAWAL_QUOTE,
   DEFAULT_PORTFOLIO_SUMMARY,
   DEFAULT_POSITION,
   DEFAULT_PREDICTION,
@@ -87,22 +108,49 @@ import {
 } from './fixtures.js';
 
 import type { HealthCheckResult } from '../client.js';
-import type { ListPositionsParams } from '../clients/portfolio.js';
-import type { BuyQuoteParams, SellQuoteParams } from '../clients/quotes.js';
-import type { CreateRedemptionOptions, RedemptionCreateResult } from '../clients/redemptions.js';
+import type { AccountClient } from '../clients/account.js';
+import type { BalanceClient } from '../clients/balance.js';
+import type { MarketsClient } from '../clients/markets.js';
 import type {
+  PartnerAccountsClient,
+  ListPartnerAccountsParams,
+  PartnerAccountCreateResult,
+  PartnerAccountWriteOptions,
+  WaitUntilActiveOptions,
+} from '../clients/partner-accounts.js';
+import type {
+  PartnerWithdrawalsClient,
+  CreatePartnerWithdrawalOptions,
+  ListPartnerWithdrawalsParams,
+  PartnerWithdrawalCreateResult,
+  PartnerWithdrawalQuoteParams,
+  WaitForWithdrawalOptions,
+} from '../clients/partner-withdrawals.js';
+import type { PortfolioClient, ListPositionsParams } from '../clients/portfolio.js';
+import type { QuotesClient, BuyQuoteParams, SellQuoteParams } from '../clients/quotes.js';
+import type {
+  RedemptionsClient,
+  CreateRedemptionOptions,
+  RedemptionCreateResult,
+} from '../clients/redemptions.js';
+import type { TracesClient } from '../clients/traces.js';
+import type {
+  TradesClient,
   CreateTradeOptions,
   TradeConfirmation,
   TradeCreateResult,
   WaitForCompletionOptions,
 } from '../clients/trades.js';
 import type {
+  WebhooksClient,
   ListWebhookEventsParams,
   RotatedWebhookSecret,
   VerifySignatureOptions,
   VerifySignatureResult,
 } from '../clients/webhooks.js';
+import type { AccountRequestOverrides } from '../internal/request-options.js';
 import type { AccountUsage } from '../schemas/account.js';
+import type { BalanceResource } from '../schemas/balance.js';
 import type {
   ListMarketsParams,
   ListPredictionsParams,
@@ -112,6 +160,7 @@ import type {
 import type { PortfolioSummary, PositionResource } from '../schemas/portfolio.js';
 import type { Quote, QuoteBuyDetail, QuoteSellDetail } from '../schemas/quote.js';
 import type { TraceResource } from '../schemas/trace.js';
+import type { ConstructedWebhookEvent } from '../schemas/webhook-event.js';
 import type { RedeliverWebhookEvent, WebhookEventResource } from '../schemas/webhook.js';
 
 // ---- Override types ----------------------------------------------------
@@ -137,10 +186,17 @@ export type MockTradesOverrides = {
   ) => TradeCreateResult | Promise<TradeCreateResult>;
   readonly confirm?: (
     id: string,
-    body: { token: string }
+    body: { token: string },
+    opts?: AccountRequestOverrides
   ) => TradeResource | Promise<TradeResource>;
-  readonly get?: (id: string) => TradeResource | Promise<TradeResource>;
-  readonly list?: (params?: ListTradesParams) => MockListResult<TradeResource>;
+  readonly get?: (
+    id: string,
+    opts?: AccountRequestOverrides
+  ) => TradeResource | Promise<TradeResource>;
+  readonly list?: (
+    params?: ListTradesParams,
+    opts?: AccountRequestOverrides
+  ) => MockListResult<TradeResource>;
   readonly waitForCompletion?: (
     id: string,
     opts?: WaitForCompletionOptions
@@ -164,9 +220,10 @@ export type MockQuotesOverrides = {
 };
 
 export type MockPortfolioOverrides = {
-  readonly get?: () => PortfolioSummary | Promise<PortfolioSummary>;
+  readonly get?: (opts?: AccountRequestOverrides) => PortfolioSummary | Promise<PortfolioSummary>;
   readonly positions?: (
-    params?: ListPositionsParams
+    params?: ListPositionsParams,
+    opts?: AccountRequestOverrides
   ) => readonly PositionResource[] | Promise<readonly PositionResource[]>;
 };
 
@@ -185,7 +242,7 @@ export type MockWebhooksOverrides = {
     header: string,
     secret: string,
     opts?: VerifySignatureOptions
-  ) => WebhookEvent | Promise<WebhookEvent>;
+  ) => ConstructedWebhookEvent | Promise<ConstructedWebhookEvent>;
 };
 
 export type MockAccountOverrides = {
@@ -193,7 +250,77 @@ export type MockAccountOverrides = {
 };
 
 export type MockTracesOverrides = {
-  readonly get?: (correlationId: string) => TraceResource | Promise<TraceResource>;
+  readonly get?: (
+    correlationId: string,
+    opts?: AccountRequestOverrides
+  ) => TraceResource | Promise<TraceResource>;
+};
+
+/**
+ * `balance.get` receives the call's options, so a handler can answer per
+ * `account`.
+ */
+export type MockBalanceOverrides = {
+  readonly get?: (opts?: AccountRequestOverrides) => BalanceResource | Promise<BalanceResource>;
+};
+
+export type MockPartnerWithdrawalsOverrides = {
+  readonly quote?: (
+    accountId: string,
+    params: PartnerWithdrawalQuoteParams
+  ) => PartnerWithdrawalQuote | Promise<PartnerWithdrawalQuote>;
+  readonly create?: (
+    accountId: string,
+    body: CreatePartnerWithdrawalBody,
+    opts: CreatePartnerWithdrawalOptions
+  ) => PartnerWithdrawalCreateResult | Promise<PartnerWithdrawalCreateResult>;
+  readonly get?: (
+    accountId: string,
+    withdrawalId: string
+  ) => PartnerWithdrawalResource | Promise<PartnerWithdrawalResource>;
+  readonly list?: (
+    accountId: string,
+    params?: ListPartnerWithdrawalsParams
+  ) => MockListResult<PartnerWithdrawalResource>;
+  readonly waitForCompletion?: (
+    accountId: string,
+    withdrawalId: string,
+    opts?: WaitForWithdrawalOptions
+  ) => PartnerWithdrawalResource | Promise<PartnerWithdrawalResource>;
+};
+
+export type MockPartnerAccountsOverrides = {
+  readonly create?: (
+    body: CreatePartnerAccountBody,
+    opts?: PartnerAccountWriteOptions
+  ) => PartnerAccountCreateResult | Promise<PartnerAccountCreateResult>;
+  readonly get?: (accountId: string) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly findByExternalId?: (
+    externalId: string
+  ) => PartnerAccountResource | null | Promise<PartnerAccountResource | null>;
+  readonly list?: (params?: ListPartnerAccountsParams) => MockListResult<PartnerAccountResource>;
+  readonly update?: (
+    accountId: string,
+    body: UpdatePartnerAccountBody,
+    opts?: PartnerAccountWriteOptions
+  ) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly suspend?: (
+    accountId: string,
+    opts?: PartnerAccountWriteOptions
+  ) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly reactivate?: (
+    accountId: string,
+    opts?: PartnerAccountWriteOptions
+  ) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly release?: (
+    accountId: string,
+    opts?: PartnerAccountWriteOptions
+  ) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly waitUntilActive?: (
+    accountId: string,
+    opts?: WaitUntilActiveOptions
+  ) => PartnerAccountResource | Promise<PartnerAccountResource>;
+  readonly withdrawals?: MockPartnerWithdrawalsOverrides;
 };
 
 export type MockKashClientOverrides = {
@@ -205,6 +332,8 @@ export type MockKashClientOverrides = {
   readonly webhooks?: MockWebhooksOverrides;
   readonly account?: MockAccountOverrides;
   readonly traces?: MockTracesOverrides;
+  readonly balance?: MockBalanceOverrides;
+  readonly partnerAccounts?: MockPartnerAccountsOverrides;
   readonly healthCheck?: () => HealthCheckResult | Promise<HealthCheckResult>;
 };
 
@@ -228,60 +357,42 @@ export type MockPageShape<T> = {
 // ---- Public mock surface ----------------------------------------------
 
 /**
- * The mock client surface — structurally compatible with the public
- * surface of {@link KashClient}. Methods return promises like the real
- * client. List methods return a {@link Page}; consumers can iterate or
- * read `.data`.
+ * The mock client surface: the real sub-client methods, picked by name, so
+ * every mocked method takes exactly the real method's parameters (options
+ * included) and returns its type. List methods return a {@link Page};
+ * consumers can iterate or read `.data`.
  */
 export type MockKashClient = {
-  readonly markets: {
-    list(params?: ListMarketsParams): Promise<Page<MarketResource>>;
-    get(id: string): Promise<MarketResource>;
-    predictions(id: string, params?: ListPredictionsParams): Promise<Page<PredictionResource>>;
-  };
-  readonly trades: {
-    create(body: CreateTradeBody, opts?: CreateTradeOptions): Promise<TradeCreateResult>;
-    confirm(id: string, body: { token: string }): Promise<TradeResource>;
-    get(id: string): Promise<TradeResource>;
-    list(params?: ListTradesParams): Promise<Page<TradeResource>>;
-    waitForCompletion(id: string, opts?: WaitForCompletionOptions): Promise<TradeResource>;
-  };
-  readonly redemptions: {
-    create(
-      body: CreateRedemptionBody,
-      opts?: CreateRedemptionOptions
-    ): Promise<RedemptionCreateResult>;
-  };
-  readonly quotes: {
-    buy(params: BuyQuoteParams): Promise<Quote & QuoteBuyDetail>;
-    sell(params: SellQuoteParams): Promise<Quote & QuoteSellDetail>;
-  };
-  readonly portfolio: {
-    get(): Promise<PortfolioSummary>;
-    positions(params?: ListPositionsParams): Promise<readonly PositionResource[]>;
-  };
-  readonly webhooks: {
-    list(params?: ListWebhookEventsParams): Promise<Page<WebhookEventResource>>;
-    redeliver(eventId: string): Promise<RedeliverWebhookEvent>;
-    rotateSecret(): Promise<RotatedWebhookSecret>;
-    verifySignature(
-      body: string,
-      header: string,
-      secret: string,
-      opts?: VerifySignatureOptions
-    ): Promise<VerifySignatureResult>;
-    constructEvent(
-      body: string,
-      header: string,
-      secret: string,
-      opts?: VerifySignatureOptions
-    ): Promise<WebhookEvent>;
-  };
-  readonly account: {
-    usage(): Promise<AccountUsage>;
-  };
-  readonly traces: {
-    get(correlationId: string): Promise<TraceResource>;
+  readonly markets: Pick<MarketsClient, 'list' | 'get' | 'predictions'>;
+  readonly trades: Pick<TradesClient, 'create' | 'confirm' | 'get' | 'list' | 'waitForCompletion'>;
+  readonly redemptions: Pick<RedemptionsClient, 'create'>;
+  /** Every public quote method (`keyof` excludes the private transport). */
+  readonly quotes: Pick<QuotesClient, keyof QuotesClient>;
+  /** `watchPositions` is not mocked: it polls forever by design; stub it in the test that needs it. */
+  readonly portfolio: Pick<PortfolioClient, 'get' | 'positions'>;
+  readonly webhooks: Pick<
+    WebhooksClient,
+    'list' | 'redeliver' | 'rotateSecret' | 'verifySignature' | 'constructEvent'
+  >;
+  readonly account: Pick<AccountClient, 'usage'>;
+  readonly traces: Pick<TracesClient, 'get'>;
+  readonly balance: Pick<BalanceClient, 'get'>;
+  readonly partnerAccounts: Pick<
+    PartnerAccountsClient,
+    | 'create'
+    | 'get'
+    | 'findByExternalId'
+    | 'list'
+    | 'update'
+    | 'suspend'
+    | 'reactivate'
+    | 'release'
+    | 'waitUntilActive'
+  > & {
+    readonly withdrawals: Pick<
+      PartnerWithdrawalsClient,
+      'quote' | 'create' | 'get' | 'list' | 'waitForCompletion'
+    >;
   };
   healthCheck(): Promise<HealthCheckResult>;
 };
@@ -303,6 +414,9 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
   const w = overrides.webhooks ?? {};
   const a = overrides.account ?? {};
   const tr = overrides.traces ?? {};
+  const b = overrides.balance ?? {};
+  const pa = overrides.partnerAccounts ?? {};
+  const pw = pa.withdrawals ?? {};
 
   return {
     markets: {
@@ -325,30 +439,28 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
         // Mirror the real client's fail-fast body pre-validation so
         // tests that exercise the bad-input path see the same throw
         // they'd get in production.
-        const parsed = CreateTradeBodySchema.safeParse(body);
-        if (!parsed.success) {
-          const issues = parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-            code: i.code,
-          }));
-          const lead = issues[0];
-          throw new KashValidationError(
-            `trades.create: ${lead ? `${lead.path || '(root)'}: ${lead.message}` : 'invalid trade body'}`,
-            { code: 'VALIDATION_FAILED', issues }
-          );
-        }
+        parseRequestBody(CreateTradeBodySchema, body, 'trades.create');
+        checkOptions(opts);
         return t.create ? t.create(body, opts) : defaultTradeCreate(body);
       },
-      confirm: async (id: string, body: { token: string }) =>
-        t.confirm ? t.confirm(id, body) : { ...DEFAULT_TRADE, id, status: 'pending' as const },
-      get: async (id: string) => (t.get ? t.get(id) : { ...DEFAULT_TRADE, id }),
-      list: async (params?: ListTradesParams) => {
+      confirm: async (id: string, body: { token: string }, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return t.confirm
+          ? t.confirm(id, body, opts)
+          : { ...DEFAULT_TRADE, id, status: 'pending' as const };
+      },
+      get: async (id: string, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return t.get ? t.get(id, opts) : { ...DEFAULT_TRADE, id };
+      },
+      list: async (params?: ListTradesParams, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
         const limit = params?.limit ?? 20;
-        const result = t.list ? await t.list(params) : [DEFAULT_TRADE];
+        const result = t.list ? await t.list(params, opts) : [DEFAULT_TRADE];
         return toMockPage(result, limit);
       },
       waitForCompletion: async (id: string, opts?: WaitForCompletionOptions) => {
+        checkOptions(opts);
         const result = t.waitForCompletion
           ? await t.waitForCompletion(id, opts)
           : { ...DEFAULT_COMPLETED_TRADE, id };
@@ -358,20 +470,9 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
     },
     redemptions: {
       create: async (body: CreateRedemptionBody, opts?: CreateRedemptionOptions) => {
-        // Same fail-fast pre-validation as the real client.
-        const parsed = CreateRedemptionBodySchema.safeParse(body);
-        if (!parsed.success) {
-          const issues = parsed.error.issues.map((i) => ({
-            path: i.path.join('.'),
-            message: i.message,
-            code: i.code,
-          }));
-          const lead = issues[0];
-          throw new KashValidationError(
-            `redemptions.create: ${lead ? `${lead.path || '(root)'}: ${lead.message}` : 'invalid redemption body'}`,
-            { code: 'VALIDATION_FAILED', issues }
-          );
-        }
+        // Same fail-fast checks as the real client.
+        parseRequestBody(CreateRedemptionBodySchema, body, 'redemptions.create');
+        checkOptions(opts);
         return r.create
           ? r.create(body, opts)
           : {
@@ -389,9 +490,14 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
         q.sell ? q.sell(params) : { ...DEFAULT_QUOTE_SELL, outcomeIndex: params.outcomeIndex },
     },
     portfolio: {
-      get: async () => (p.get ? p.get() : DEFAULT_PORTFOLIO_SUMMARY),
-      positions: async (params?: ListPositionsParams) =>
-        p.positions ? p.positions(params) : [DEFAULT_POSITION],
+      get: async (opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return p.get ? p.get(opts) : DEFAULT_PORTFOLIO_SUMMARY;
+      },
+      positions: async (params?: ListPositionsParams, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return p.positions ? p.positions(params, opts) : [DEFAULT_POSITION];
+      },
     },
     webhooks: {
       list: async (params?: ListWebhookEventsParams) => {
@@ -453,33 +559,185 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
             code: 'WEBHOOK_SIGNATURE_INVALID',
           });
         }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(body);
-        } catch (err) {
-          throw new KashValidationError('Webhook body is not valid JSON.', {
-            code: 'SDK_PARSE',
-            cause: err,
-          });
-        }
-        const eventResult = WebhookEventSchema.safeParse(parsed);
-        if (!eventResult.success) {
-          throw new KashValidationError(
-            `Webhook body did not match any known event shape: ${eventResult.error.issues
-              .map((i) => `${i.path.join('.')}: ${i.message}`)
-              .join('; ')}`,
-            { code: 'SDK_VALIDATION' }
-          );
-        }
-        return eventResult.data;
+        return parseWebhookEvent(body);
       },
     },
     account: {
       usage: async () => (a.usage ? a.usage() : DEFAULT_ACCOUNT_USAGE),
     },
     traces: {
-      get: async (correlationId: string) =>
-        tr.get ? tr.get(correlationId) : { ...DEFAULT_TRACE, correlationId },
+      get: async (correlationId: string, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return tr.get ? tr.get(correlationId, opts) : { ...DEFAULT_TRACE, correlationId };
+      },
+    },
+    balance: {
+      get: async (opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return b.get ? b.get(opts) : DEFAULT_BALANCE;
+      },
+    },
+    // The partner methods mirror the real client's client-side checks (body
+    // schemas, UUID ids, the required withdrawal key), so a test of the bad
+    // input path sees the same throw it would in production.
+    partnerAccounts: {
+      create: async (body: CreatePartnerAccountBody, opts?: PartnerAccountWriteOptions) => {
+        const parsed = parseRequestBody(
+          CreatePartnerAccountBodySchema,
+          body,
+          'partnerAccounts.create'
+        );
+        checkOptions(opts);
+        if (pa.create) return pa.create(body, opts);
+        return {
+          account: {
+            ...DEFAULT_PARTNER_ACCOUNT,
+            externalId: parsed.externalId,
+            destination: parsed.destination,
+            country: parsed.country,
+            status: 'provisioning',
+            depositAddress: null,
+          },
+          outcome: 'created',
+          idempotentReplay: false,
+        } satisfies PartnerAccountCreateResult;
+      },
+      get: async (accountId: string) => {
+        validateUuid(accountId, 'accountId');
+        return pa.get ? pa.get(accountId) : { ...DEFAULT_PARTNER_ACCOUNT, accountId };
+      },
+      findByExternalId: async (externalId: string) => {
+        const id = parseRequestBody(
+          PartnerExternalIdSchema,
+          externalId,
+          'partnerAccounts.findByExternalId: externalId'
+        );
+        return pa.findByExternalId
+          ? pa.findByExternalId(id)
+          : { ...DEFAULT_PARTNER_ACCOUNT, externalId: id };
+      },
+      list: async (params?: ListPartnerAccountsParams) => {
+        const limit = pageLimit(params?.limit, 'partnerAccounts.list');
+        const result = pa.list ? await pa.list(params) : [DEFAULT_PARTNER_ACCOUNT];
+        return toMockPage(result, limit);
+      },
+      update: async (
+        accountId: string,
+        body: UpdatePartnerAccountBody,
+        opts?: PartnerAccountWriteOptions
+      ) => {
+        validateUuid(accountId, 'accountId');
+        checkOptions(opts);
+        const parsed = parseRequestBody(
+          UpdatePartnerAccountBodySchema,
+          body,
+          'partnerAccounts.update'
+        );
+        if (pa.update) return pa.update(accountId, body, opts);
+        return {
+          ...DEFAULT_PARTNER_ACCOUNT,
+          accountId,
+          ...(parsed.destination === undefined ? {} : { destination: parsed.destination }),
+          ...(parsed.country === undefined ? {} : { country: parsed.country }),
+        };
+      },
+      suspend: async (accountId: string, opts?: PartnerAccountWriteOptions) => {
+        validateUuid(accountId, 'accountId');
+        checkOptions(opts);
+        return pa.suspend
+          ? pa.suspend(accountId, opts)
+          : { ...DEFAULT_PARTNER_ACCOUNT, accountId, status: 'suspended' };
+      },
+      reactivate: async (accountId: string, opts?: PartnerAccountWriteOptions) => {
+        validateUuid(accountId, 'accountId');
+        checkOptions(opts);
+        return pa.reactivate
+          ? pa.reactivate(accountId, opts)
+          : { ...DEFAULT_PARTNER_ACCOUNT, accountId, status: 'active' };
+      },
+      release: async (accountId: string, opts?: PartnerAccountWriteOptions) => {
+        validateUuid(accountId, 'accountId');
+        checkOptions(opts);
+        return pa.release
+          ? pa.release(accountId, opts)
+          : { ...DEFAULT_PARTNER_ACCOUNT, accountId, status: 'released' };
+      },
+      waitUntilActive: async (accountId: string, opts?: WaitUntilActiveOptions) => {
+        validateUuid(accountId, 'accountId');
+        const result = pa.waitUntilActive
+          ? await pa.waitUntilActive(accountId, opts)
+          : { ...DEFAULT_PARTNER_ACCOUNT, accountId };
+        opts?.onStatus?.(result);
+        return result;
+      },
+      withdrawals: {
+        quote: async (accountId: string, params: PartnerWithdrawalQuoteParams) => {
+          validateUuid(accountId, 'accountId');
+          const parsed = parseRequestBody(
+            CreatePartnerWithdrawalBodySchema,
+            params,
+            'partnerAccounts.withdrawals.quote'
+          );
+          return pw.quote
+            ? pw.quote(accountId, params)
+            : defaultWithdrawalQuote(parsed.amountAtomic);
+        },
+        create: async (
+          accountId: string,
+          body: CreatePartnerWithdrawalBody,
+          opts: CreatePartnerWithdrawalOptions
+        ) => {
+          validateUuid(accountId, 'accountId');
+          const parsed = parseRequestBody(
+            CreatePartnerWithdrawalBodySchema,
+            body,
+            'partnerAccounts.withdrawals.create'
+          );
+          requireIdempotencyKey(
+            (opts as Partial<CreatePartnerWithdrawalOptions> | undefined)?.idempotencyKey,
+            'partnerAccounts.withdrawals.create'
+          );
+          checkOptions(opts);
+          if (pw.create) return pw.create(accountId, body, opts);
+          return {
+            withdrawal: {
+              ...DEFAULT_PARTNER_WITHDRAWAL,
+              accountId,
+              amountAtomic: parsed.amountAtomic,
+            },
+            outcome: 'created',
+            idempotentReplay: false,
+          } satisfies PartnerWithdrawalCreateResult;
+        },
+        get: async (accountId: string, withdrawalId: string) => {
+          validateUuid(accountId, 'accountId');
+          validateUuid(withdrawalId, 'withdrawalId');
+          return pw.get
+            ? pw.get(accountId, withdrawalId)
+            : { ...DEFAULT_PARTNER_WITHDRAWAL, accountId, withdrawalId };
+        },
+        list: async (accountId: string, params?: ListPartnerWithdrawalsParams) => {
+          validateUuid(accountId, 'accountId');
+          const limit = pageLimit(params?.limit, 'partnerAccounts.withdrawals.list');
+          const result = pw.list
+            ? await pw.list(accountId, params)
+            : [{ ...DEFAULT_PARTNER_WITHDRAWAL, accountId }];
+          return toMockPage(result, limit);
+        },
+        waitForCompletion: async (
+          accountId: string,
+          withdrawalId: string,
+          opts?: WaitForWithdrawalOptions
+        ) => {
+          validateUuid(accountId, 'accountId');
+          validateUuid(withdrawalId, 'withdrawalId');
+          const result = pw.waitForCompletion
+            ? await pw.waitForCompletion(accountId, withdrawalId, opts)
+            : { ...DEFAULT_PARTNER_WITHDRAWAL, accountId, withdrawalId, status: 'completed' };
+          opts?.onStatus?.(result);
+          return result;
+        },
+      },
     },
     healthCheck: async () =>
       overrides.healthCheck
@@ -489,6 +747,30 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
 }
 
 // ---- Internals --------------------------------------------------------
+
+/**
+ * The default quote for `amountAtomic`: the fixture's Arc destination, which
+ * charges the network fee on top, so the debit is the amount plus the fee.
+ */
+function defaultWithdrawalQuote(amountAtomic: string): PartnerWithdrawalQuote {
+  const fee = DEFAULT_PARTNER_WITHDRAWAL_QUOTE.networkFeeAtomic;
+  return {
+    ...DEFAULT_PARTNER_WITHDRAWAL_QUOTE,
+    amountAtomic,
+    ...(fee === undefined
+      ? {}
+      : { totalDebitAtomic: (BigInt(amountAtomic) + BigInt(fee)).toString() }),
+  };
+}
+
+/** The real client's option checks: a UUID `account`, a well-formed `Idempotency-Key`. */
+function checkOptions(opts?: {
+  readonly account?: string | undefined;
+  readonly idempotencyKey?: string | undefined;
+}): void {
+  if (opts?.account !== undefined) validateUuid(opts.account, 'account');
+  if (opts?.idempotencyKey !== undefined) validateIdempotencyKey(opts.idempotencyKey);
+}
 
 function defaultTradeCreate(body: CreateTradeBody): TradeCreateResult {
   return {
@@ -528,8 +810,12 @@ function toMockPage<T>(result: readonly T[] | MockPageShape<T>, limit: number): 
 // barrel as the factory.
 export {
   DEFAULT_ACCOUNT_USAGE,
+  DEFAULT_BALANCE,
   DEFAULT_COMPLETED_TRADE,
   DEFAULT_MARKET,
+  DEFAULT_PARTNER_ACCOUNT,
+  DEFAULT_PARTNER_WITHDRAWAL,
+  DEFAULT_PARTNER_WITHDRAWAL_QUOTE,
   DEFAULT_PORTFOLIO_SUMMARY,
   DEFAULT_POSITION,
   DEFAULT_PREDICTION,
@@ -541,6 +827,9 @@ export {
   DEFAULT_TRADE,
   DEFAULT_WEBHOOK_EVENT,
 } from './fixtures.js';
+
+export { generateTestWebhookSignature } from './webhook-signature.js';
+export type { GenerateTestWebhookSignatureInput } from './webhook-signature.js';
 
 // Re-export the confirmation-flag helper type — handy for callers
 // constructing an awaiting-confirmation TradeCreateResult.

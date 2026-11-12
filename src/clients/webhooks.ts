@@ -14,8 +14,10 @@ import {
   KashValidationError,
   KashWebhookSignatureError,
 } from '../errors.js';
+import { hmacSha256Hex } from '../internal/hmac.js';
 import { buildPage, type Page } from '../internal/pagination.js';
-import { WebhookEventSchema, type WebhookEvent } from '../schemas/webhook-event.js';
+import { transportOverrides, type RequestOverrides } from '../internal/request-options.js';
+import { parseWebhookEvent } from '../internal/webhook-event-parse.js';
 import {
   ListWebhookEventsResponseSchema,
   RedeliverWebhookResponseSchema,
@@ -24,8 +26,9 @@ import {
   type WebhookEventResource,
 } from '../schemas/webhook.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
-import type { Pagination } from '../schemas/common.js';
+import type { KashHttpClient } from '../internal/http.js';
+import type { Pagination } from '../schemas/envelope.js';
+import type { ConstructedWebhookEvent } from '../schemas/webhook-event.js';
 
 /**
  * Result of {@link WebhooksClient.rotateSecret}. The plaintext
@@ -122,7 +125,7 @@ export class WebhooksClient {
         method: 'GET',
         schema: ListWebhookEventsResponseSchema,
         query: { cursor, limit, status },
-        ...opts,
+        ...transportOverrides(opts),
       });
       return result;
     };
@@ -140,7 +143,7 @@ export class WebhooksClient {
       method: 'POST',
       schema: RedeliverWebhookResponseSchema,
       body: {},
-      ...opts,
+      ...transportOverrides(opts),
     });
     return result.event;
   }
@@ -156,7 +159,7 @@ export class WebhooksClient {
       method: 'POST',
       schema: RotateWebhookSecretResponseSchema,
       body: {},
-      ...opts,
+      ...transportOverrides(opts),
     });
     return result.webhookSecret;
   }
@@ -293,11 +296,13 @@ export class WebhooksClient {
    * `{ valid: false }` for) — short-circuit your handler with a
    * 400 response.
    *
-   * Throws {@link KashValidationError} when the body verifies but
-   * doesn't match a known event shape — the rare case of a server
-   * version newer than the SDK pinned (re-throw to surface the drift
-   * in your logs) — OR when the caller passed a non-string `body`
-   * (a parsed object instead of the raw bytes).
+   * A verified delivery whose `type` this SDK version does not know is
+   * returned as an `UnknownWebhookEvent` (`isUnknownWebhookEvent`), never
+   * thrown: handle it in a default branch. Throws
+   * {@link KashValidationError} when the body verifies but is not a
+   * well-formed envelope, or is a known type that does not match its
+   * shape (a broken delivery), or when the caller passed a non-string
+   * `body` (a parsed object instead of the raw bytes).
    *
    * Throws {@link KashConfigurationError} when the `secret` is missing
    * or whitespace-only — typically a missing env var. Distinct class
@@ -313,32 +318,14 @@ export class WebhooksClient {
     signatureHeader: string,
     secret: string,
     opts: VerifySignatureOptions = {}
-  ): Promise<WebhookEvent> {
+  ): Promise<ConstructedWebhookEvent> {
     const result = await this.verifySignature(body, signatureHeader, secret, opts);
     if (!result.valid) {
       throw new KashWebhookSignatureError(result.reason, {
         code: 'WEBHOOK_SIGNATURE_INVALID',
       });
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch (err) {
-      throw new KashValidationError('Webhook body is not valid JSON.', {
-        code: 'SDK_PARSE',
-        cause: err,
-      });
-    }
-    const eventResult = WebhookEventSchema.safeParse(parsed);
-    if (!eventResult.success) {
-      throw new KashValidationError(
-        `Webhook body did not match any known event shape: ${eventResult.error.issues
-          .map((i) => `${i.path.join('.')}: ${i.message}`)
-          .join('; ')}`,
-        { code: 'SDK_VALIDATION' }
-      );
-    }
-    return eventResult.data;
+    return parseWebhookEvent(body);
   }
 }
 
@@ -380,39 +367,6 @@ function parseSignatureHeader(header: string): ParsedHeader | null {
   }
   if (timestampMs === null) return null;
   return { timestampMs, v1Values };
-}
-
-async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) {
-    // Runtime-environment misconfiguration. KashConfigurationError so
-    // consumers branch via `instanceof KashError` consistently — never
-    // a plain Error escapes verifySignature / constructEvent.
-    throw new KashConfigurationError(
-      '@kashdao/sdk: `crypto.subtle` is not available in this runtime. ' +
-        'Webhook signature verification requires Web Crypto (Node 22+, browsers, Deno, Bun).',
-      { code: 'SDK_WEB_CRYPTO_UNAVAILABLE' }
-    );
-  }
-  const encoder = new TextEncoder();
-  const key = await subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await subtle.sign('HMAC', key, encoder.encode(payload));
-  return bufferToHex(new Uint8Array(signature));
-}
-
-function bufferToHex(buf: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < buf.length; i++) {
-    const v = buf[i] ?? 0;
-    out += v.toString(16).padStart(2, '0');
-  }
-  return out;
 }
 
 /**

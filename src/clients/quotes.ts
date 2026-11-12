@@ -20,6 +20,7 @@
  */
 
 import { KashValidationError } from '../errors.js';
+import { transportOverrides, type RequestOverrides } from '../internal/request-options.js';
 import {
   QuoteResponseSchema,
   type Quote,
@@ -28,7 +29,7 @@ import {
   type QuoteSellDetail,
 } from '../schemas/quote.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
+import type { KashHttpClient } from '../internal/http.js';
 
 export type BuyQuoteParams = {
   /** Market UUID. */
@@ -83,7 +84,7 @@ export class QuotesClient {
         outcomeIndex: params.outcomeIndex,
         amount: stringifyAmount(params.amountUsdcAtomic),
       },
-      ...opts,
+      ...transportOverrides(opts),
     });
     return attachMarket(assertBuy(result.quote), result.market);
   }
@@ -115,7 +116,7 @@ export class QuotesClient {
         outcomeIndex: params.outcomeIndex,
         amount: stringifyAmount(params.tokensInWad),
       },
-      ...opts,
+      ...transportOverrides(opts),
     });
     return attachMarket(assertSell(result.quote), result.market);
   }

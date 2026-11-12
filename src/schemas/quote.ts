@@ -18,8 +18,8 @@
 import { z } from 'zod';
 
 import { publicChainIdSchema } from './_chain.js';
-import { MetaSchema } from './common.js';
-import { marketTradeabilityFields } from './market.js';
+import { MetaSchema } from './envelope.js';
+import { MarketStatusSchema, marketTradeabilityFields } from './market.js';
 
 const wadIntegerString = z.string().regex(/^\d+$/, 'Must be a non-negative integer string');
 const usdcIntegerString = z.string().regex(/^\d+$/, 'Must be a non-negative integer string');
@@ -28,7 +28,7 @@ export const QuoteActionSchema = z.enum(['buy', 'sell']);
 export type QuoteAction = z.infer<typeof QuoteActionSchema>;
 
 export const QuoteMarketSummarySchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   contractAddress: z.string(),
   /**
    * ABSENT for a non-EVM market, rather than carrying its surrogate.
@@ -59,7 +59,7 @@ export const QuoteMarketSummarySchema = z.object({
       probability: z.number().min(0).max(1),
     })
   ),
-  status: z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']).nullable(),
+  status: MarketStatusSchema.nullable(),
   /**
    * See the market resource. A quote reads the curve, so it can answer for a
    * market whose trade would be refused (resolved, frozen): `tradeable` says so
@@ -76,6 +76,12 @@ const sharedQuoteFieldsSchema = z.object({
   c: wadIntegerString,
   pAfter: z.array(wadIntegerString),
   qAfter: z.array(wadIntegerString),
+  /**
+   * Price per outcome token, in RAW units: atomic USDC (6 decimals) per WAD
+   * token unit (18 decimals), so a price of 0.42 USDC per token reads as
+   * about `4.2e-13`. Multiply by `1e12` for USDC per whole token. A
+   * convenience float; for exact math use the integer-string fields.
+   */
   effectivePrice: z.number(),
   impliedProbability: z.number().min(0).max(1).nullable(),
 });

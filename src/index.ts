@@ -41,7 +41,7 @@ export {
   inferBaseUrlFromApiKey,
 } from './internal/config.js';
 export type { KashClientConfig, KashClientConfigInput, FetchLike } from './internal/config.js';
-export type { RequestOverrides } from './internal/http.js';
+export type { RequestOverrides } from './internal/request-options.js';
 export type {
   ErrorHookEvent,
   KashClientHooks,
@@ -81,6 +81,9 @@ export type {
   ProblemDetailsLike,
 } from './errors.js';
 
+export { KASH_ERROR_CODE } from './error-codes.js';
+export type { KashErrorCode, KnownKashErrorCode } from './error-codes.js';
+
 // Pagination primitive — exposed so consumers can type their own
 // helpers around the `Page<T>` shape.
 export { Page } from './internal/pagination.js';
@@ -106,20 +109,8 @@ export type {
 
 // Schemas + types — exported so consumers can compose around the
 // resource shapes (e.g. typing their own caches).
-export { ProblemDetailsSchema, PaginationSchema, MetaSchema } from './schemas/common.js';
-export type { ProblemDetails, Pagination, Meta } from './schemas/common.js';
+export type { ProblemDetails, Pagination, Meta } from './schemas/envelope.js';
 
-export {
-  GetMarketResponseSchema,
-  ListMarketsResponseSchema,
-  ListPredictionsResponseSchema,
-  MarketNotTradeableReasonSchema,
-  MarketOutcomeSchema,
-  MarketResolutionStateSchema,
-  MarketResourceSchema,
-  MarketStatusSchema,
-  PredictionResourceSchema,
-} from './schemas/market.js';
 export type {
   GetMarketResponse,
   ListMarketsParams,
@@ -134,24 +125,7 @@ export type {
   PredictionResource,
 } from './schemas/market.js';
 
-export {
-  AmbassadorTokenSchema,
-  ClientRequestIdSchema,
-  ConfirmTradeBodySchema,
-  ConfirmTradeResponseSchema,
-  CreateTradeAcceptedResponseSchema,
-  CreateTradeBodySchema,
-  CreateTradeCreatedResponseSchema,
-  CreateTradeResponseSchema,
-  GetTradeResponseSchema,
-  ListTradesResponseSchema,
-  TERMINAL_TRADE_STATUSES,
-  TradeMetadataSchema,
-  TradeResourceSchema,
-  TradeSideSchema,
-  TradeStatusSchema,
-  UsdcAmountSchema,
-} from './schemas/trade.js';
+export { TERMINAL_TRADE_STATUSES } from './schemas/trade.js';
 export type {
   AmbassadorToken,
   ClientRequestId,
@@ -171,12 +145,6 @@ export type {
   UsdcAmount,
 } from './schemas/trade.js';
 
-export {
-  PortfolioSummaryResponseSchema,
-  PortfolioSummarySchema,
-  PositionResourceSchema,
-  PositionsResponseSchema,
-} from './schemas/portfolio.js';
 export type {
   PortfolioSummary,
   PortfolioSummaryResponse,
@@ -184,13 +152,6 @@ export type {
   PositionsResponse,
 } from './schemas/portfolio.js';
 
-export {
-  GetTraceResponseSchema,
-  TraceEventDataSchema,
-  TraceEventSchema,
-  TraceResourceSchema,
-  TraceRetentionSchema,
-} from './schemas/trace.js';
 export type {
   GetTraceResponse,
   TraceEvent,
@@ -199,14 +160,6 @@ export type {
   TraceRetention,
 } from './schemas/trace.js';
 
-export {
-  QuoteActionSchema,
-  QuoteBuyDetailSchema,
-  QuoteDetailSchema,
-  QuoteMarketSummarySchema,
-  QuoteResponseSchema,
-  QuoteSellDetailSchema,
-} from './schemas/quote.js';
 export type {
   Quote,
   QuoteAction,
@@ -217,13 +170,6 @@ export type {
   QuoteSellDetail,
 } from './schemas/quote.js';
 
-export {
-  ListWebhookEventsResponseSchema,
-  RedeliverWebhookEventSchema,
-  RedeliverWebhookResponseSchema,
-  RotateWebhookSecretResponseSchema,
-  WebhookEventResourceSchema,
-} from './schemas/webhook.js';
 export type {
   ListWebhookEventsResponse,
   RedeliverWebhookEvent,
@@ -234,26 +180,17 @@ export type {
 
 // Webhook delivery payloads — the body the customer's endpoint
 // receives. Distinct from the management surface above.
-export {
-  TradeCompletedPayloadSchema,
-  TradeConfirmationRequiredPayloadSchema,
-  TradeFailedPayloadSchema,
-  WebhookEventSchema,
-} from './schemas/webhook-event.js';
+export { isUnknownWebhookEvent } from './schemas/webhook-event.js';
 export type {
+  ConstructedWebhookEvent,
   TradeCompletedPayload,
   TradeConfirmationRequiredPayload,
   TradeFailedPayload,
+  UnknownWebhookEvent,
   WebhookEvent,
   WebhookEventType,
 } from './schemas/webhook-event.js';
 
-export {
-  CreateRedemptionBodySchema,
-  CreateRedemptionResponseSchema,
-  RedemptionKindSchema,
-  RedemptionResourceSchema,
-} from './schemas/redemption.js';
 export type {
   CreateRedemptionBody,
   CreateRedemptionResponse,
@@ -282,11 +219,14 @@ export type { CreateRedemptionOptions, RedemptionCreateResult } from './clients/
 export { PortfolioClient, WATCH_POSITIONS_DEFAULTS } from './clients/portfolio.js';
 export type { ListPositionsParams, WatchPositionsParams } from './clients/portfolio.js';
 export { AccountClient } from './clients/account.js';
-export { AccountUsageResponseSchema, AccountUsageSchema } from './schemas/account.js';
 export type { AccountUsage, AccountUsageResponse } from './schemas/account.js';
 export { QuotesClient } from './clients/quotes.js';
 export type { BuyQuoteParams, SellQuoteParams } from './clients/quotes.js';
 export { TracesClient } from './clients/traces.js';
+
+// Partner accounts and withdrawals (partner keys only).
+// The destination types the partner resources share with the partner
+// webhooks; their schemas are served from `@kashdao/sdk/webhooks`.
 export { WebhooksClient } from './clients/webhooks.js';
 export type {
   ListWebhookEventsParams,

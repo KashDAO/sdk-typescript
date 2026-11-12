@@ -21,7 +21,12 @@
  * work without an edge-facing layer, use the Express starter instead.
  */
 
-import { KashClient, KashError, KashWebhookSignatureError } from '@kashdao/sdk';
+import {
+  isUnknownWebhookEvent,
+  KashClient,
+  KashError,
+  KashWebhookSignatureError,
+} from '@kashdao/sdk';
 
 interface Env {
   KASH_API_KEY: string;
@@ -67,8 +72,14 @@ export default {
           }
           throw err;
         }
-        // event.type narrows event.data per variant. Dispatch your
-        // business logic here. Dedupe on event.id.
+        // A type newer than this SDK version arrives as an
+        // UnknownWebhookEvent: acknowledge it and handle it after upgrading.
+        // Past that check, event.type narrows event.data per variant.
+        // Dispatch your business logic here. Dedupe on event.id.
+        if (isUnknownWebhookEvent(event)) {
+          console.log(`webhook type not handled yet: ${event.type} (${event.id})`);
+          return new Response(null, { status: 204 });
+        }
         console.log(`webhook: ${event.type} (${event.id})`);
         return new Response(null, { status: 204 });
       }

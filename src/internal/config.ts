@@ -131,8 +131,16 @@ export type ResponseHookEvent = RequestHookEvent & {
 };
 
 export type RetryHookEvent = RequestHookEvent & {
-  /** Why the retry was scheduled. */
-  readonly reason: 'rate_limit' | 'server_error' | 'network' | 'timeout';
+  /**
+   * Why the retry was scheduled. `idempotency_in_progress`: an earlier
+   * attempt with the same `Idempotency-Key` is still running on the server.
+   */
+  readonly reason:
+    | 'rate_limit'
+    | 'server_error'
+    | 'network'
+    | 'timeout'
+    | 'idempotency_in_progress';
   /** How long the SDK is about to sleep before the next attempt. */
   readonly delayMs: number;
 };
@@ -238,7 +246,7 @@ export const kashClientConfigSchema = z.object({
    * no key) defaults to `https://api.kash.bot/v1`. Pass an explicit
    * value to override (private mirror, local mock, future region).
    */
-  baseUrl: z.string().url().default(PRODUCTION_BASE_URL),
+  baseUrl: z.url().default(PRODUCTION_BASE_URL),
   /** Per-request timeout (ms). Default 30s; matches the server-side cap. */
   timeoutMs: z.number().int().positive().default(30_000),
   /**

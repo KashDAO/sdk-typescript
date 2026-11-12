@@ -25,6 +25,7 @@ import { describe, expect, it } from 'vitest';
 
 // SDK schemas — the consumer-facing copy.
 import { AccountUsageResponseSchema, AccountUsageSchema } from '../../src/schemas/account.js';
+import { BalanceResourceSchema, GetBalanceResponseSchema } from '../../src/schemas/balance.js';
 import {
   GetMarketResponseSchema,
   ListMarketsResponseSchema,
@@ -37,6 +38,23 @@ import {
   PositionResourceSchema,
   PositionsResponseSchema,
 } from '../../src/schemas/portfolio.js';
+import {
+  CreatePartnerAccountBodySchema,
+  GetPartnerAccountResponseSchema,
+  ListPartnerAccountsResponseSchema,
+  PartnerAccountResourceSchema,
+  UpdatePartnerAccountBodySchema,
+  WritePartnerAccountResponseSchema,
+} from '../../src/schemas/partner-account.js';
+import {
+  CreatePartnerWithdrawalBodySchema,
+  CreatePartnerWithdrawalResponseSchema,
+  GetPartnerWithdrawalResponseSchema,
+  ListPartnerWithdrawalsResponseSchema,
+  PartnerWithdrawalQuoteResponseSchema,
+  PartnerWithdrawalQuoteSchema,
+  PartnerWithdrawalResourceSchema,
+} from '../../src/schemas/partner-withdrawal.js';
 import { QuoteResponseSchema } from '../../src/schemas/quote.js';
 import {
   GetTraceResponseSchema,
@@ -344,6 +362,192 @@ export const FIXTURE_WEBHOOK_EVENT_TRADE_CONFIRMATION_REQUIRED = {
   data: FIXTURE_TRADE_CONFIRMATION_REQUIRED_PAYLOAD,
 };
 
+// Partner webhooks: one canonical body per type, keyed by `type`. Values
+// are shapes production sends: a base58 Solana address and signature, an
+// Arc `0x` address, USDC in atomic units.
+
+const PARTNER_ACCOUNT_REF = {
+  accountId: '00000000-0000-0000-0000-000000000070',
+  externalId: 'user-8841',
+};
+
+const SOLANA_SIGNATURE =
+  '3C7V6ugFiyv4Kq7VRWQHAA9qHcfGRosKP8WEyM9Lv2Uqa3SJkuT26t9YjhPzTKnvqZguVG3jjuUg2UHfqRKoLP97';
+
+const ARC_TX_HASH = '0x' + 'b'.repeat(64);
+
+const ARC_DESTINATION = {
+  network: 'arc' as const,
+  address: '0x' + 'c'.repeat(40),
+};
+
+const SOLANA_DESTINATION = {
+  network: 'solana' as const,
+  address: '8yYpcE7Jx9NmXNMGR6NGumBUu4UBpMTVQW44P9hwikyh',
+};
+
+const PARTNER_WITHDRAWAL_COMMON = {
+  ...PARTNER_ACCOUNT_REF,
+  withdrawalId: '00000000-0000-0000-0000-000000000071',
+  amountAtomic: '2500000',
+  // To Arc nothing is measured as delivered; the quote guarantees a minimum.
+  deliveredAmountAtomic: null,
+  minimumDeliveredAtomic: '2490000',
+  destination: ARC_DESTINATION,
+};
+
+export const FIXTURE_PARTNER_WEBHOOK_PAYLOADS = {
+  'account.active': {
+    ...PARTNER_ACCOUNT_REF,
+    status: 'active' as const,
+    depositAddress: '8yYpcE7Jx9NmXNMGR6NGumBUu4UBpMTVQW44P9hwikyh',
+    activatedAt: '2026-11-07T09:59:00.000Z',
+  },
+  'account.provisioning_failed': {
+    ...PARTNER_ACCOUNT_REF,
+    status: 'provisioning_failed' as const,
+    reason: 'privy_refused' as const,
+    failedAt: '2026-11-07T09:59:00.000Z',
+  },
+  'account.destination_changed': {
+    ...PARTNER_ACCOUNT_REF,
+    previousDestination: SOLANA_DESTINATION,
+    destination: ARC_DESTINATION,
+    changedAt: '2026-11-07T10:05:00.000Z',
+  },
+  'account.released': {
+    ...PARTNER_ACCOUNT_REF,
+    status: 'released' as const,
+    releasedAt: '2026-11-07T12:00:00.000Z',
+  },
+  'withdrawal.submitted': {
+    ...PARTNER_WITHDRAWAL_COMMON,
+    status: 'pending' as const,
+    submittedAt: '2026-11-07T10:30:00.000Z',
+  },
+  'withdrawal.completed': {
+    ...PARTNER_WITHDRAWAL_COMMON,
+    status: 'completed' as const,
+    transactionHash: SOLANA_SIGNATURE,
+    destinationTransactionHash: ARC_TX_HASH,
+    completedAt: '2026-11-07T10:32:00.000Z',
+  },
+  'withdrawal.failed': {
+    ...PARTNER_WITHDRAWAL_COMMON,
+    status: 'cancelled' as const,
+    errorCode: 'bridge_refunded' as const,
+    errorMessage: "The bridge to Arc failed and the USDC was returned to the account's wallet.",
+    failedAt: '2026-11-07T10:40:00.000Z',
+  },
+  'payout.completed': {
+    ...PARTNER_ACCOUNT_REF,
+    payoutId: '00000000-0000-0000-0000-000000000072',
+    marketId: '00000000-0000-0000-0000-000000000001',
+    outcomeIndex: 1,
+    amountAtomic: '5000000',
+    chainRef: 'solana:mainnet-beta',
+    transactionHash: SOLANA_SIGNATURE,
+    paidAt: '2026-11-07T11:00:00.000Z',
+  },
+};
+
+export type PartnerWebhookFixtureType = keyof typeof FIXTURE_PARTNER_WEBHOOK_PAYLOADS;
+
+/** The full delivery body for a partner webhook fixture. */
+export function partnerWebhookEnvelope(type: PartnerWebhookFixtureType): {
+  id: string;
+  type: PartnerWebhookFixtureType;
+  apiVersion: string;
+  createdAt: string;
+  data: (typeof FIXTURE_PARTNER_WEBHOOK_PAYLOADS)[PartnerWebhookFixtureType];
+} {
+  return {
+    id: '00000000-0000-0000-0000-000000000053',
+    type,
+    apiVersion: '2026-08-19',
+    createdAt: '2026-11-07T12:00:00.000Z',
+    data: FIXTURE_PARTNER_WEBHOOK_PAYLOADS[type],
+  };
+}
+
+export const PARTNER_WEBHOOK_FIXTURE_TYPES = Object.keys(
+  FIXTURE_PARTNER_WEBHOOK_PAYLOADS
+) as PartnerWebhookFixtureType[];
+
+// Partner REST resources: accounts, withdrawals, the withdrawal quote and
+// the balance a partner reads for an account. Same production shapes as the
+// webhook fixtures above.
+
+export const FIXTURE_PARTNER_ACCOUNT = {
+  accountId: PARTNER_ACCOUNT_REF.accountId,
+  externalId: PARTNER_ACCOUNT_REF.externalId,
+  status: 'active' as const,
+  depositAddress: SOLANA_DESTINATION.address,
+  destination: ARC_DESTINATION,
+  country: 'GB',
+  createdAt: '2026-11-07T09:58:00.000Z',
+};
+
+/** The account as `create` first answers it: no wallet yet. */
+export const FIXTURE_PARTNER_ACCOUNT_PROVISIONING = {
+  ...FIXTURE_PARTNER_ACCOUNT,
+  status: 'provisioning' as const,
+  depositAddress: null,
+};
+
+export const FIXTURE_CREATE_PARTNER_ACCOUNT_BODY = {
+  externalId: PARTNER_ACCOUNT_REF.externalId,
+  destination: ARC_DESTINATION,
+  country: 'GB',
+  consent: { acceptedAt: '2026-11-07T09:57:00Z', termsVersion: 'kash-partner-2026-11' },
+  email: 'user-8841@example.com',
+};
+
+export const FIXTURE_PARTNER_WITHDRAWAL = {
+  withdrawalId: PARTNER_WITHDRAWAL_COMMON.withdrawalId,
+  accountId: PARTNER_ACCOUNT_REF.accountId,
+  amountAtomic: '2500000',
+  deliveredAmountAtomic: null,
+  minimumDeliveredAtomic: null,
+  status: 'pending' as const,
+  destination: ARC_DESTINATION,
+  transactionHash: null,
+  destinationTransactionHash: null,
+  networkFeeAtomic: null,
+  createdAt: '2026-11-07T10:30:00.000Z',
+  updatedAt: '2026-11-07T10:30:00.000Z',
+};
+
+/** A completed withdrawal to Arc: the bridge's guaranteed minimum, both transactions. */
+export const FIXTURE_PARTNER_WITHDRAWAL_COMPLETED = {
+  ...FIXTURE_PARTNER_WITHDRAWAL,
+  status: 'completed' as const,
+  minimumDeliveredAtomic: '2490000',
+  transactionHash: SOLANA_SIGNATURE,
+  destinationTransactionHash: ARC_TX_HASH,
+  networkFeeAtomic: '8000',
+  updatedAt: '2026-11-07T10:32:00.000Z',
+};
+
+export const FIXTURE_PARTNER_WITHDRAWAL_QUOTE = {
+  amountAtomic: '2500000',
+  destination: ARC_DESTINATION,
+  receiveAtomic: '2490000',
+  receiveEstimated: true,
+  estimatedSeconds: 45,
+  maxAmountAtomic: '24990000',
+  networkFeeAtomic: '10000',
+  networkFeeEstimated: true,
+  totalDebitAtomic: '2510000',
+};
+
+export const FIXTURE_BALANCE = {
+  usdcAtomic: '25000000',
+  pendingWithdrawalsAtomic: '2500000',
+  availableAtomic: '22500000',
+  observedAt: '2026-11-07T10:31:00.000Z',
+};
+
 // -----------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------
@@ -385,11 +589,12 @@ describe('wire-shape parity: SDK schemas accept canonical API responses', () => 
     expect('tradeable' in parsed).toBe(false);
   });
 
-  it('MarketResource refuses a reason outside the published set', () => {
-    expect(
-      MarketResourceSchema.safeParse({ ...FIXTURE_MARKET_CANCELLED, notTradeableReason: 'paused' })
-        .success
-    ).toBe(false);
+  it('MarketResource keeps a reason this SDK does not know rather than refusing the market', () => {
+    const parsed = MarketResourceSchema.parse({
+      ...FIXTURE_MARKET_CANCELLED,
+      notTradeableReason: 'paused',
+    });
+    expect(parsed.notTradeableReason).toBe('paused');
   });
 
   it('ListMarketsResponse', () => {
@@ -642,6 +847,10 @@ describe('wire-shape parity: SDK schemas accept canonical API responses', () => 
     );
   });
 
+  it.each(PARTNER_WEBHOOK_FIXTURE_TYPES)('WebhookEvent (%s envelope)', (type) => {
+    expectAccepts(WebhookEventSchema, partnerWebhookEnvelope(type), `WebhookEvent (${type})`);
+  });
+
   it('ConfirmTradeBody', () => {
     expectAccepts(ConfirmTradeBodySchema, { token: 'a'.repeat(48) }, 'ConfirmTradeBody');
   });
@@ -678,5 +887,214 @@ describe('wire-shape parity: SDK schemas accept canonical API responses', () => 
       },
       'RotateWebhookSecretResponse'
     );
+  });
+});
+
+describe('wire-shape parity: partner REST resources', () => {
+  it('PartnerAccountResource (active and provisioning)', () => {
+    expectAccepts(PartnerAccountResourceSchema, FIXTURE_PARTNER_ACCOUNT, 'PartnerAccountResource');
+    expectAccepts(
+      PartnerAccountResourceSchema,
+      FIXTURE_PARTNER_ACCOUNT_PROVISIONING,
+      'PartnerAccountResource (provisioning)'
+    );
+  });
+
+  it('GetPartnerAccountResponse', () => {
+    expectAccepts(
+      GetPartnerAccountResponseSchema,
+      { account: FIXTURE_PARTNER_ACCOUNT, data: FIXTURE_PARTNER_ACCOUNT, _meta: FIXTURE_META },
+      'GetPartnerAccountResponse'
+    );
+  });
+
+  it('WritePartnerAccountResponse', () => {
+    expectAccepts(
+      WritePartnerAccountResponseSchema,
+      {
+        account: FIXTURE_PARTNER_ACCOUNT_PROVISIONING,
+        data: FIXTURE_PARTNER_ACCOUNT_PROVISIONING,
+        _meta: { ...FIXTURE_META, idempotent: false },
+      },
+      'WritePartnerAccountResponse'
+    );
+  });
+
+  it('ListPartnerAccountsResponse', () => {
+    expectAccepts(
+      ListPartnerAccountsResponseSchema,
+      {
+        data: [FIXTURE_PARTNER_ACCOUNT],
+        pagination: { cursor: null, hasMore: false, limit: 20 },
+        _meta: FIXTURE_META,
+      },
+      'ListPartnerAccountsResponse'
+    );
+  });
+
+  it('CreatePartnerAccountBody and UpdatePartnerAccountBody', () => {
+    expectAccepts(
+      CreatePartnerAccountBodySchema,
+      FIXTURE_CREATE_PARTNER_ACCOUNT_BODY,
+      'CreatePartnerAccountBody'
+    );
+    expectAccepts(
+      UpdatePartnerAccountBodySchema,
+      { destination: SOLANA_DESTINATION, country: 'FR' },
+      'UpdatePartnerAccountBody'
+    );
+  });
+
+  it('PartnerWithdrawalResource (pending and completed)', () => {
+    expectAccepts(
+      PartnerWithdrawalResourceSchema,
+      FIXTURE_PARTNER_WITHDRAWAL,
+      'PartnerWithdrawalResource'
+    );
+    expectAccepts(
+      PartnerWithdrawalResourceSchema,
+      FIXTURE_PARTNER_WITHDRAWAL_COMPLETED,
+      'PartnerWithdrawalResource (completed)'
+    );
+  });
+
+  it('withdrawal envelopes: get, create and list', () => {
+    expectAccepts(
+      GetPartnerWithdrawalResponseSchema,
+      {
+        withdrawal: FIXTURE_PARTNER_WITHDRAWAL,
+        data: FIXTURE_PARTNER_WITHDRAWAL,
+        _meta: FIXTURE_META,
+      },
+      'GetPartnerWithdrawalResponse'
+    );
+    expectAccepts(
+      CreatePartnerWithdrawalResponseSchema,
+      {
+        withdrawal: FIXTURE_PARTNER_WITHDRAWAL,
+        data: FIXTURE_PARTNER_WITHDRAWAL,
+        _meta: { ...FIXTURE_META, idempotent: false },
+      },
+      'CreatePartnerWithdrawalResponse'
+    );
+    expectAccepts(
+      ListPartnerWithdrawalsResponseSchema,
+      {
+        data: [FIXTURE_PARTNER_WITHDRAWAL_COMPLETED],
+        pagination: { cursor: 'cur-1', hasMore: true, limit: 1 },
+        _meta: FIXTURE_META,
+      },
+      'ListPartnerWithdrawalsResponse'
+    );
+  });
+
+  it('CreatePartnerWithdrawalBody', () => {
+    expectAccepts(
+      CreatePartnerWithdrawalBodySchema,
+      { amountAtomic: '2500000' },
+      'CreatePartnerWithdrawalBody'
+    );
+  });
+
+  it('PartnerWithdrawalQuote and its envelope', () => {
+    expectAccepts(
+      PartnerWithdrawalQuoteSchema,
+      FIXTURE_PARTNER_WITHDRAWAL_QUOTE,
+      'PartnerWithdrawalQuote'
+    );
+    expectAccepts(
+      PartnerWithdrawalQuoteResponseSchema,
+      {
+        quote: FIXTURE_PARTNER_WITHDRAWAL_QUOTE,
+        data: FIXTURE_PARTNER_WITHDRAWAL_QUOTE,
+        _meta: FIXTURE_META,
+      },
+      'PartnerWithdrawalQuoteResponse'
+    );
+  });
+
+  it('BalanceResource and GetBalanceResponse', () => {
+    expectAccepts(BalanceResourceSchema, FIXTURE_BALANCE, 'BalanceResource');
+    expectAccepts(
+      GetBalanceResponseSchema,
+      { balance: FIXTURE_BALANCE, data: FIXTURE_BALANCE, _meta: FIXTURE_META },
+      'GetBalanceResponse'
+    );
+  });
+
+  it('a status, network or field this SDK does not know parses and is kept or stripped', () => {
+    const newer = PartnerWithdrawalResourceSchema.parse({
+      ...FIXTURE_PARTNER_WITHDRAWAL,
+      status: 'reversing',
+      destination: { network: 'base', address: '0x' + 'd'.repeat(40) },
+      feeAtomic: '1000',
+    });
+
+    expect(newer.status).toBe('reversing');
+    expect(newer.destination.network).toBe('base');
+    expect(newer).not.toHaveProperty('feeAtomic');
+    expect(
+      PartnerAccountResourceSchema.parse({ ...FIXTURE_PARTNER_ACCOUNT, status: 'frozen' }).status
+    ).toBe('frozen');
+  });
+
+  it('request bodies stay strict: a mistyped key fails client-side', () => {
+    expect(
+      CreatePartnerAccountBodySchema.safeParse({
+        ...FIXTURE_CREATE_PARTNER_ACCOUNT_BODY,
+        emial: 'x',
+      }).success
+    ).toBe(false);
+    expect(CreatePartnerWithdrawalBodySchema.safeParse({ amountAtomic: 2500000 }).success).toBe(
+      false
+    );
+    expect(CreatePartnerWithdrawalBodySchema.safeParse({ amountAtomic: '0' }).success).toBe(false);
+  });
+});
+
+describe('wire-shape parity: partner withdrawal fee disclosure (optional)', () => {
+  it('parses and keeps the fee fields', () => {
+    const quote = PartnerWithdrawalQuoteSchema.parse(FIXTURE_PARTNER_WITHDRAWAL_QUOTE);
+    expect([quote.networkFeeAtomic, quote.networkFeeEstimated, quote.totalDebitAtomic]).toEqual([
+      '10000',
+      true,
+      '2510000',
+    ]);
+    expect(
+      PartnerWithdrawalResourceSchema.parse(FIXTURE_PARTNER_WITHDRAWAL_COMPLETED).networkFeeAtomic
+    ).toBe('8000');
+    expect(
+      PartnerWithdrawalResourceSchema.parse(FIXTURE_PARTNER_WITHDRAWAL).networkFeeAtomic
+    ).toBeNull();
+  });
+
+  it('an API release without fee disclosure still parses, the fields absent', () => {
+    const {
+      networkFeeAtomic: _f,
+      networkFeeEstimated: _e,
+      totalDebitAtomic: _t,
+      ...olderQuote
+    } = FIXTURE_PARTNER_WITHDRAWAL_QUOTE;
+    const quote = PartnerWithdrawalQuoteSchema.parse(olderQuote);
+    expect(quote.networkFeeAtomic).toBeUndefined();
+    expect(quote.totalDebitAtomic).toBeUndefined();
+
+    const { networkFeeAtomic: _w, ...olderWithdrawal } = FIXTURE_PARTNER_WITHDRAWAL_COMPLETED;
+    expect(PartnerWithdrawalResourceSchema.parse(olderWithdrawal).networkFeeAtomic).toBeUndefined();
+  });
+
+  it('a present fee must still be an atomic integer string', () => {
+    expect(
+      PartnerWithdrawalQuoteSchema.safeParse({
+        ...FIXTURE_PARTNER_WITHDRAWAL_QUOTE,
+        networkFeeAtomic: '0.01',
+      }).success
+    ).toBe(false);
+    expect(
+      PartnerWithdrawalResourceSchema.safeParse({
+        ...FIXTURE_PARTNER_WITHDRAWAL_COMPLETED,
+        networkFeeAtomic: 8000,
+      }).success
+    ).toBe(false);
   });
 });

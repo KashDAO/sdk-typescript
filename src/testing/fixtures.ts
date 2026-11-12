@@ -11,7 +11,13 @@
  */
 
 import type { AccountUsage } from '../schemas/account.js';
+import type { BalanceResource } from '../schemas/balance.js';
 import type { MarketResource, PredictionResource } from '../schemas/market.js';
+import type { PartnerAccountResource } from '../schemas/partner-account.js';
+import type {
+  PartnerWithdrawalQuote,
+  PartnerWithdrawalResource,
+} from '../schemas/partner-withdrawal.js';
 import type { PortfolioSummary, PositionResource } from '../schemas/portfolio.js';
 import type {
   Quote,
@@ -150,7 +156,8 @@ const DEFAULT_QUOTE_BUY_DETAIL: QuoteBuyDetail = {
   c: '1000000000000000000',
   pAfter: ['440000000000000000', '560000000000000000'],
   qAfter: ['737340124711760000000', '500000000000000000000'],
-  effectivePrice: 0.421,
+  // Raw units, as the API computes it: amountIn / tokensOut, atomic USDC per WAD token.
+  effectivePrice: 100_000_000 / 237_340_124_711_760_000_000,
   impliedProbability: 0.44,
 };
 
@@ -164,7 +171,8 @@ const DEFAULT_QUOTE_SELL_DETAIL: QuoteSellDetail = {
   c: '1000000000000000000',
   pAfter: ['418000000000000000', '582000000000000000'],
   qAfter: ['736340124711760000000', '500000000000000000000'],
-  effectivePrice: 0.42,
+  // Raw units: usdcOut / tokensIn, atomic USDC per WAD token.
+  effectivePrice: 420_000 / 1_000_000_000_000_000_000,
   impliedProbability: 0.418,
 };
 
@@ -272,4 +280,65 @@ export const DEFAULT_TRACE: TraceResource = {
       },
     },
   ],
+};
+
+// ---- Partner accounts, withdrawals and balance ------------------------
+
+const PARTNER_ACCOUNT_ID = '66666666-6666-4666-8666-666666666666';
+const PARTNER_WITHDRAWAL_ID = '77777777-7777-4777-8777-777777777777';
+/** A synthetic base58 Solana wallet, in the real alphabet. */
+const PARTNER_DEPOSIT_ADDRESS = 'KashPartnerWa11et1111111111111111111111111';
+/** A synthetic Arc (EVM) address, lower case as the API stores it. */
+const PARTNER_ARC_DESTINATION = {
+  network: 'arc',
+  address: '0x2c7536e3605d9c16a7a3d7b1898e529396a65c23',
+} as const;
+
+/** Default {@link PartnerAccountResource}: an active account withdrawing to Arc. */
+export const DEFAULT_PARTNER_ACCOUNT: PartnerAccountResource = {
+  accountId: PARTNER_ACCOUNT_ID,
+  externalId: 'user-8841',
+  status: 'active',
+  depositAddress: PARTNER_DEPOSIT_ADDRESS,
+  destination: PARTNER_ARC_DESTINATION,
+  country: 'GB',
+  createdAt: ISO_FIXED,
+};
+
+/** Default {@link PartnerWithdrawalResource}: a pending 2.5 USDC withdrawal to Arc. */
+export const DEFAULT_PARTNER_WITHDRAWAL: PartnerWithdrawalResource = {
+  withdrawalId: PARTNER_WITHDRAWAL_ID,
+  accountId: PARTNER_ACCOUNT_ID,
+  amountAtomic: '2500000',
+  deliveredAmountAtomic: null,
+  minimumDeliveredAtomic: null,
+  status: 'pending',
+  destination: PARTNER_ARC_DESTINATION,
+  transactionHash: null,
+  destinationTransactionHash: null,
+  networkFeeAtomic: null,
+  createdAt: ISO_FIXED,
+  updatedAt: ISO_FIXED,
+};
+
+/** Default {@link PartnerWithdrawalQuote}: 2.5 USDC to Arc, a bridge minimum and estimate. */
+export const DEFAULT_PARTNER_WITHDRAWAL_QUOTE: PartnerWithdrawalQuote = {
+  amountAtomic: '2500000',
+  destination: PARTNER_ARC_DESTINATION,
+  receiveAtomic: '2490000',
+  receiveEstimated: true,
+  estimatedSeconds: 45,
+  maxAmountAtomic: '24990000',
+  // To Arc the fee is charged on top, so the debit is the amount plus the fee.
+  networkFeeAtomic: '10000',
+  networkFeeEstimated: true,
+  totalDebitAtomic: '2510000',
+};
+
+/** Default {@link BalanceResource}: 25 USDC, 2.5 of it held by a pending withdrawal. */
+export const DEFAULT_BALANCE: BalanceResource = {
+  usdcAtomic: '25000000',
+  pendingWithdrawalsAtomic: '2500000',
+  availableAtomic: '22500000',
+  observedAt: ISO_FIXED,
 };

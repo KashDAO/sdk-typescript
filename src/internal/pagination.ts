@@ -20,7 +20,7 @@
 
 import { KashValidationError } from '../errors.js';
 
-import type { Pagination } from '../schemas/common.js';
+import type { Pagination } from '../schemas/envelope.js';
 
 export type PageFetcher<T> = (cursor: string | undefined) => Promise<{
   readonly data: readonly T[];

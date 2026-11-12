@@ -70,4 +70,25 @@ describe('TracesClient', () => {
     const url = fetchSpy.mock.calls[0]![0] as string;
     expect(url).toContain('/traces/weird%20id%2Fwith%20slashes');
   });
+
+  it('get — a field the server adds to an event or to retention is stripped, not refused', async () => {
+    // Both schemas were `.strict()` until 0.4.0, so one new server field
+    // failed the whole response with KashValidationError.
+    const withExtras = {
+      ...TRACE,
+      events: [{ ...TRACE.events[0]!, data: { ...TRACE.events[0]!.data, venue: 'amm-v2' } }],
+      retention: { windowDays: 90, expired: false, archivedAt: null },
+    };
+    const fetchSpy = vi.fn(async () => jsonResponse({ trace: withExtras, _meta: META }));
+    const kash = new KashClient({
+      apiKey: 'kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      fetch: fetchSpy as typeof fetch,
+      maxRetries: 0,
+    });
+
+    const result = await kash.traces.get(TRACE.correlationId);
+
+    expect(result.events[0]!.data).toEqual(TRACE.events[0]!.data);
+    expect(result.retention).toEqual({ windowDays: 90, expired: false });
+  });
 });

@@ -24,6 +24,7 @@ import {
   KashAuthenticationError,
   KashClient,
   type KashClientConfig,
+  type KashClientConfigInput,
   type KashClientHooks,
   type KashErrorContext,
   KashRateLimitError,
@@ -56,7 +57,10 @@ import {
 
 describe('KashClient public surface', () => {
   it('constructs from a config object only — no positional args', () => {
-    expectTypeOf(KashClient).constructorParameters.toEqualTypeOf<[KashClientConfig]>();
+    // Optional: with no argument the client reads KASH_API_KEY / KASH_BASE_URL.
+    expectTypeOf(KashClient).constructorParameters.toEqualTypeOf<
+      [config?: KashClientConfigInput]
+    >();
   });
 
   it('exposes the documented resource clients as readonly properties', () => {
@@ -68,12 +72,15 @@ describe('KashClient public surface', () => {
     expectTypeOf<ClientShape>().toHaveProperty('quotes');
     expectTypeOf<ClientShape>().toHaveProperty('traces');
     expectTypeOf<ClientShape>().toHaveProperty('webhooks');
+    expectTypeOf<ClientShape>().toHaveProperty('balance');
+    expectTypeOf<ClientShape>().toHaveProperty('partnerAccounts');
+    expectTypeOf<ClientShape['partnerAccounts']>().toHaveProperty('withdrawals');
   });
 });
 
 describe('config / hooks / overrides', () => {
-  it('KashClientConfig.apiKey is required', () => {
-    expectTypeOf<KashClientConfig>().toHaveProperty('apiKey').toBeString();
+  it('KashClientConfig.apiKey is an optional string (KASH_API_KEY fills it)', () => {
+    expectTypeOf<KashClientConfig['apiKey']>().toEqualTypeOf<string | undefined>();
   });
 
   it('hooks are optional and exception-safe at the type level (return void)', () => {
@@ -84,9 +91,10 @@ describe('config / hooks / overrides', () => {
     expectTypeOf<Hooks['onError']>().toBeNullable();
   });
 
-  it('RetryHookEvent carries the rate-limit + idempotent-replay context', () => {
+  it('RetryHookEvent carries the attempt, the reason and the delay', () => {
     expectTypeOf<RetryHookEvent>().toHaveProperty('attempt').toBeNumber();
-    expectTypeOf<RetryHookEvent>().toHaveProperty('rateLimit');
+    expectTypeOf<RetryHookEvent>().toHaveProperty('reason');
+    expectTypeOf<RetryHookEvent>().toHaveProperty('delayMs').toBeNumber();
   });
 
   it('ServerDeprecationNotice exposes RFC 8594 fields as optional', () => {
@@ -107,8 +115,11 @@ describe('config / hooks / overrides', () => {
 
 describe('error hierarchy', () => {
   it('all named errors share the KashErrorContext shape', () => {
-    expectTypeOf<KashAuthenticationError['context']>().toMatchTypeOf<KashErrorContext>();
-    expectTypeOf<KashValidationError['context']>().toMatchTypeOf<KashErrorContext>();
+    // Undefined until the HTTP layer attaches it (client-side errors never get one).
+    expectTypeOf<KashAuthenticationError['context']>().toEqualTypeOf<
+      KashErrorContext | undefined
+    >();
+    expectTypeOf<KashValidationError['context']>().toEqualTypeOf<KashErrorContext | undefined>();
   });
 
   it('KashRateLimitError surfaces retryAfterSeconds as a number', () => {
@@ -123,8 +134,11 @@ describe('error hierarchy', () => {
 });
 
 describe('trade lifecycle types', () => {
-  it('TradeStatus is a string literal union (not a wide string)', () => {
-    expectTypeOf<TradeStatus>().not.toBeString();
+  it('TradeStatus keeps its known members, and is open to a status the API adds', () => {
+    expectTypeOf<Extract<TradeStatus, 'completed' | 'pending'>>().toEqualTypeOf<
+      'completed' | 'pending'
+    >();
+    expectTypeOf<'a-status-added-later'>().toExtend<TradeStatus>();
     // Spot-check known statuses are part of the union.
     expectTypeOf<'completed'>().toExtend<TradeStatus>();
     expectTypeOf<'pending'>().toExtend<TradeStatus>();
@@ -166,20 +180,23 @@ describe('trade lifecycle types', () => {
     expectTypeOf<TradeConfirmation>().toHaveProperty('expiresAt');
   });
 
-  it('GetTradeResponse mirrors the API envelope (data + meta)', () => {
+  it('GetTradeResponse mirrors the API envelope (trade, its data alias, _meta)', () => {
+    expectTypeOf<GetTradeResponse>().toHaveProperty('trade');
     expectTypeOf<GetTradeResponse>().toHaveProperty('data');
-    expectTypeOf<GetTradeResponse>().toHaveProperty('meta');
+    expectTypeOf<GetTradeResponse>().toHaveProperty('_meta');
   });
 
   it('ListTradesResponse mirrors the paginated envelope', () => {
     expectTypeOf<ListTradesResponse>().toHaveProperty('data');
-    expectTypeOf<ListTradesResponse>().toHaveProperty('meta');
+    expectTypeOf<ListTradesResponse>().toHaveProperty('pagination');
+    expectTypeOf<ListTradesResponse>().toHaveProperty('_meta');
   });
 
-  it('WaitForCompletionOptions exposes timeout + interval + onStatus', () => {
+  it('WaitForCompletionOptions exposes timeout + poll interval + onStatus + account', () => {
     expectTypeOf<WaitForCompletionOptions>().toHaveProperty('timeoutMs');
-    expectTypeOf<WaitForCompletionOptions>().toHaveProperty('intervalMs');
+    expectTypeOf<WaitForCompletionOptions>().toHaveProperty('pollIntervalMs');
     expectTypeOf<WaitForCompletionOptions>().toHaveProperty('onStatus');
+    expectTypeOf<WaitForCompletionOptions>().toHaveProperty('account');
   });
 });
 
@@ -231,7 +248,10 @@ describe('pagination', () => {
   it('Page<T> is generic and async-iterable', () => {
     type P = Page<MarketResource>;
     expectTypeOf<P>().toHaveProperty('data');
-    expectTypeOf<P>().toHaveProperty('hasNextPage');
+    expectTypeOf<P>().toHaveProperty('hasMore').toBeBoolean();
+    expectTypeOf<P>().toHaveProperty('nextCursor');
+    expectTypeOf<P>().toHaveProperty('getNextPage');
+    expectTypeOf<P>().toExtend<AsyncIterable<MarketResource>>();
   });
 });
 

@@ -5,18 +5,18 @@
 
 import { z } from 'zod';
 
-import { MetaSchema } from './common.js';
+import { MetaSchema } from './envelope.js';
 
 export const PositionResourceSchema = z.object({
-  marketId: z.string().uuid(),
+  marketId: z.guid(),
   outcomeIndex: z.number().int().nonnegative(),
   /** WAD-encoded outcome-token balance (integer string). */
   shares: z.string().regex(/^\d+$/),
   /** Cost basis paid in atomic USDC (integer string). */
   costBasisAtomic: z.string().regex(/^\d+$/),
   tradeCount: z.number().int().nonnegative(),
-  firstTradeAt: z.string().datetime(),
-  lastTradeAt: z.string().datetime(),
+  firstTradeAt: z.iso.datetime(),
+  lastTradeAt: z.iso.datetime(),
 });
 
 export type PositionResource = z.infer<typeof PositionResourceSchema>;

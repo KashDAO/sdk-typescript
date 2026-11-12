@@ -9,7 +9,8 @@
 
 import { z } from 'zod';
 
-import { MetaSchema } from './common.js';
+import { openEnum } from './_open-enum.js';
+import { MetaSchema } from './envelope.js';
 
 /**
  * Body for `redemptions.create()`. Mirrors the server's strict schema, so a
@@ -20,7 +21,7 @@ import { MetaSchema } from './common.js';
  */
 export const CreateRedemptionBodySchema = z
   .object({
-    marketId: z.string().uuid(),
+    marketId: z.guid(),
     outcomeIndex: z.number().int().min(0).max(255),
   })
   .strict();
@@ -28,13 +29,13 @@ export const CreateRedemptionBodySchema = z
 export type CreateRedemptionBody = z.infer<typeof CreateRedemptionBodySchema>;
 
 /** `resolved` redeems a winning outcome; `cancelled` refunds a cancelled market. */
-export const RedemptionKindSchema = z.enum(['resolved', 'cancelled']);
+export const RedemptionKindSchema = openEnum(['resolved', 'cancelled']);
 
 export type RedemptionKind = z.infer<typeof RedemptionKindSchema>;
 
 export const RedemptionResourceSchema = z.object({
-  id: z.string().uuid(),
-  marketId: z.string().uuid(),
+  id: z.guid(),
+  marketId: z.guid(),
   outcomeIndex: z.number().int().min(0).max(255),
   kind: RedemptionKindSchema,
   /** WAD-encoded (18-decimal) outcome-token balance being redeemed, as an integer string. */

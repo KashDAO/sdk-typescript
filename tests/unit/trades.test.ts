@@ -437,9 +437,15 @@ describe('TradesClient', () => {
     const t = { ...TRADE_BASE, status: 'pending_confirmation' as TradeStatus };
     const fetchSpy = vi.fn(async () => jsonResponse({ trade: t, data: t, _meta: META }));
     const kash = makeKash(fetchSpy as typeof fetch);
-    await expect(
-      kash.trades.waitForCompletion(TRADE_BASE.id, { pollIntervalMs: 1, timeoutMs: 1_000 })
-    ).rejects.toBeInstanceOf(KashConflictError);
+    const err = await kash.trades
+      .waitForCompletion(TRADE_BASE.id, { pollIntervalMs: 1, timeoutMs: 1_000 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KashConflictError);
+    // The published 0.3.x code is kept; the message says what to do.
+    expect((err as KashConflictError).code).toBe('TRADE_NOT_AWAITING_CONFIRMATION');
+    expect((err as KashConflictError).message).toMatch(
+      /is pending_confirmation and will not progress until it is confirmed/
+    );
   });
 
   it('waitForCompletion — throws KashTimeoutError on timeout', async () => {

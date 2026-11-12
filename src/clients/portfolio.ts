@@ -5,6 +5,7 @@
  */
 
 import { KashConfigurationError } from '../errors.js';
+import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import { sleepWithAbort } from '../internal/sleep.js';
 import {
   PortfolioSummaryResponseSchema,
@@ -13,7 +14,7 @@ import {
   type PositionResource,
 } from '../schemas/portfolio.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
+import type { KashHttpClient } from '../internal/http.js';
 
 export type ListPositionsParams = {
   /** Optional single-market filter. */
@@ -50,28 +51,31 @@ const WATCH_POSITIONS_FLOOR_MS = 1_000;
 export class PortfolioClient {
   constructor(private readonly http: KashHttpClient) {}
 
-  /** Aggregate portfolio summary for the authenticated user. */
-  async get(opts: RequestOverrides = {}): Promise<PortfolioSummary> {
+  /**
+   * Aggregate portfolio summary for the authenticated user, or for the
+   * partner account named by `opts.account`.
+   */
+  async get(opts: AccountRequestOverrides = {}): Promise<PortfolioSummary> {
     const result = await this.http.request({
       path: '/portfolio',
       method: 'GET',
       schema: PortfolioSummaryResponseSchema,
-      ...opts,
+      ...accountOverrides(opts),
     });
     return result.portfolio;
   }
 
-  /** Per-position breakdown. */
+  /** Per-position breakdown, for the key's user or the account named by `opts.account`. */
   async positions(
     params: ListPositionsParams = {},
-    opts: RequestOverrides = {}
+    opts: AccountRequestOverrides = {}
   ): Promise<readonly PositionResource[]> {
     const result = await this.http.request({
       path: '/portfolio/positions',
       method: 'GET',
       schema: PositionsResponseSchema,
       query: { marketId: params.marketId },
-      ...opts,
+      ...accountOverrides(opts),
     });
     return result.data;
   }
@@ -107,7 +111,7 @@ export class PortfolioClient {
    */
   async *watchPositions(
     params: WatchPositionsParams = {},
-    opts: RequestOverrides = {}
+    opts: AccountRequestOverrides = {}
   ): AsyncGenerator<readonly PositionResource[], never, undefined> {
     const minIntervalMs = params.minIntervalMs ?? WATCH_POSITIONS_DEFAULTS.minIntervalMs;
     const maxIntervalMs = params.maxIntervalMs ?? WATCH_POSITIONS_DEFAULTS.maxIntervalMs;
@@ -123,7 +127,7 @@ export class PortfolioClient {
         method: 'GET',
         schema: PositionsResponseSchema,
         query: { marketId: params.marketId },
-        ...opts,
+        ...accountOverrides(opts),
         ...(signal === undefined ? {} : { signal }),
       });
       // Always compare CONTENT against what this watch last yielded. A 304

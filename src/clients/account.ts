@@ -14,9 +14,10 @@
  * ```
  */
 
+import { transportOverrides, type RequestOverrides } from '../internal/request-options.js';
 import { AccountUsageResponseSchema, type AccountUsage } from '../schemas/account.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
+import type { KashHttpClient } from '../internal/http.js';
 
 export class AccountClient {
   constructor(private readonly http: KashHttpClient) {}
@@ -27,7 +28,7 @@ export class AccountClient {
       path: '/account/usage',
       method: 'GET',
       schema: AccountUsageResponseSchema,
-      ...opts,
+      ...transportOverrides(opts),
     });
     return result.data;
   }

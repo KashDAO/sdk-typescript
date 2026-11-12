@@ -15,6 +15,7 @@
 import {
   isAwaitingConfirmation,
   isTerminalTrade,
+  isUnknownWebhookEvent,
   KashClient,
   KashError,
   KashWebhookSignatureError,
@@ -96,9 +97,15 @@ app.post('/webhooks/kash', express.raw({ type: 'application/json' }), async (req
     throw err; // → centralised error handler below
   }
 
+  // A type newer than this SDK version arrives as an UnknownWebhookEvent:
+  // acknowledge it and handle it after upgrading. Past that check,
   // event.type narrows event.data per variant. Dedupe on event.id
   // (operator-triggered redeliveries reuse the same id) before
   // dispatching your business logic.
+  if (isUnknownWebhookEvent(event)) {
+    console.log(`webhook type not handled yet: ${event.type} (${event.id})`);
+    return res.status(204).end();
+  }
   console.log(`webhook: ${event.type} (${event.id})`);
 
   return res.status(204).end();

@@ -45,11 +45,9 @@ export type Pagination = z.infer<typeof PaginationSchema>;
  * may add fields (e.g. `idempotent: boolean`); consumers should not
  * pin to an exact shape.
  */
-export const MetaSchema = z
-  .object({
-    requestId: z.string(),
-    timestamp: z.string().datetime(),
-  })
-  .passthrough();
+export const MetaSchema = z.looseObject({
+  requestId: z.string(),
+  timestamp: z.iso.datetime(),
+});
 
 export type Meta = z.infer<typeof MetaSchema>;

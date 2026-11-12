@@ -7,9 +7,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { KashRateLimitError, KashValidationError } from '../../src/index.js';
 import {
-  KashRateLimitError,
-  KashValidationError,
   ListMarketsResponseSchema,
   ListPredictionsResponseSchema,
   ListTradesResponseSchema,
@@ -19,7 +18,7 @@ import {
   QuoteResponseSchema,
   RedemptionResourceSchema,
   TradeResourceSchema,
-} from '../../src/index.js';
+} from '../../src/schemas/index.js';
 import {
   createMockKashClient,
   DEFAULT_MARKET,
@@ -560,7 +559,7 @@ describe('createMockKashClient — overrides', () => {
     ).rejects.toThrow(/raw request body as a string/);
   });
 
-  it('webhooks.constructEvent default throws KashValidationError on unknown event shape', async () => {
+  it('webhooks.constructEvent default throws KashValidationError on a malformed envelope', async () => {
     const kash = createMockKashClient();
     await expect(
       kash.webhooks.constructEvent(
@@ -568,7 +567,7 @@ describe('createMockKashClient — overrides', () => {
         'header',
         'whsec_test'
       )
-    ).rejects.toThrow(/did not match any known event shape/);
+    ).rejects.toThrow(/not a webhook envelope/);
   });
 
   it('webhooks.constructEvent override is invoked when supplied', async () => {

@@ -11,7 +11,7 @@
 
 import express from 'express';
 
-import { KashClient, KashWebhookSignatureError } from '@kashdao/sdk';
+import { isUnknownWebhookEvent, KashClient, KashWebhookSignatureError } from '@kashdao/sdk';
 
 const app = express();
 const kash = new KashClient({ apiKey: process.env['KASH_API_KEY']! });
@@ -35,8 +35,15 @@ app.post('/webhooks/kash', express.raw({ type: 'application/json' }), async (req
     throw err;
   }
 
-  // event.type narrows event.data to the matching payload shape.
-  // Dedupe on event.id (also returned in X-Kash-Event-Id header) to
+  // A type newer than this SDK version arrives as an UnknownWebhookEvent.
+  // Acknowledge it (a 2xx stops the retries) and handle it after upgrading.
+  if (isUnknownWebhookEvent(event)) {
+    console.log(`[${event.id}] webhook type ${event.type} not handled yet`);
+    return res.status(204).end();
+  }
+
+  // Past that check, event.type narrows event.data to the matching payload
+  // shape. Dedupe on event.id (also returned in X-Kash-Event-Id header) to
   // make repeated deliveries safe.
   switch (event.type) {
     case 'trade.completed':
@@ -53,6 +60,10 @@ app.post('/webhooks/kash', express.raw({ type: 'application/json' }), async (req
         `[${event.id}] trade ${event.data.tradeId} awaiting confirmation; ` +
           `expires=${event.data.confirmationExpiresAt}`
       );
+      break;
+    default:
+      // Known types this handler does not act on (trade.rejected, the
+      // partner account, withdrawal and payout events).
       break;
   }
 

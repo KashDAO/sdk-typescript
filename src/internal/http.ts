@@ -8,6 +8,8 @@
  *
  *   - Inject `X-API-Key`, `User-Agent`, `Accept`, `X-Kash-Api-Version`.
  *   - Inject `Idempotency-Key` from per-call opts when supplied.
+ *   - Inject `Kash-Account` from the per-call `account` option, which only
+ *     the account-scoped sub-client methods accept.
  *   - Honour AbortController timeouts → {@link KashTimeoutError}.
  *   - Retry 429 / 5xx with exponential backoff + full jitter.
  *   - Honour `Retry-After` on 429 (delta-seconds OR HTTP-date),
@@ -40,8 +42,22 @@ import {
 
 import { ConditionalCache, type ConditionalCacheEntry } from './conditional-cache.js';
 import { PRODUCTION_BASE_URL, STAGING_BASE_URL } from './config.js';
+import {
+  autoIdempotencyKey,
+  IN_PROGRESS_RETRY_CUTOFF_MS,
+  validateIdempotencyKey,
+} from './idempotency-key.js';
+import { parseProblemDetails } from './problem-details.js';
+import { conditionalCacheKey, sanitizeCustomHeaders } from './request-headers.js';
+import { validateUuid } from './request-options.js';
+import {
+  parseDeprecationHeaders,
+  parseIdempotentReplayHeader,
+  parseRateLimitHeaders,
+} from './response-headers.js';
 import { sleepWithAbort } from './sleep.js';
 import { USER_AGENT } from './version.js';
+import { joinIssuePath } from './zod-issues.js';
 
 import type {
   ErrorHookEvent,
@@ -57,41 +73,6 @@ import type { z } from 'zod';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-/**
- * Per-call overrides accepted by every resource method's optional
- * trailing `opts` argument. Lets the consumer override transport-layer
- * defaults on a single request without spinning up a fresh
- * {@link KashClient} via {@link KashClient.withConfig}.
- *
- * @example
- * ```ts
- * await kash.markets.list(
- *   { status: 'ACTIVE' },
- *   {
- *     headers: { traceparent: '00-<trace-id>-<span-id>-01' },
- *     timeoutMs: 60_000,
- *     signal: controller.signal,
- *   }
- * );
- * ```
- */
-export type RequestOverrides = {
-  /**
-   * Headers added to this single request. Merged on top of the
-   * client-config `headers`. SDK-managed headers (`X-API-Key`,
-   * `User-Agent`, `Content-Type`, `Accept`, `Idempotency-Key`,
-   * `X-Kash-Api-Version`) always win — consumer cannot override them via
-   * this option.
-   */
-  readonly headers?: Record<string, string>;
-  /** Override `timeoutMs` for this single request. */
-  readonly timeoutMs?: number;
-  /** Override `maxRetries` for this single request. */
-  readonly maxRetries?: number;
-  /** Caller-supplied AbortSignal — composed with the SDK's timeout signal. */
-  readonly signal?: AbortSignal;
-};
-
 export type RequestOptions<T> = {
   /** Path relative to `baseUrl`. Should start with `/`. */
   readonly path: string;
@@ -104,6 +85,8 @@ export type RequestOptions<T> = {
   readonly query?: Record<string, string | number | boolean | undefined | null>;
   /** Optional `Idempotency-Key` (POST routes only). */
   readonly idempotencyKey?: string;
+  /** The account to act for, sent as `Kash-Account`. See {@link AccountRequestOverrides}. */
+  readonly account?: string;
   /** Override the global timeout for this request. */
   readonly timeoutMs?: number;
   /** Override the global maxRetries for this request. */
@@ -115,6 +98,19 @@ export type RequestOptions<T> = {
    * and the SDK-managed headers (which always win on collision).
    */
   readonly headers?: Record<string, string>;
+  /** Return the status and replay flag with the body. See {@link KashHttpClient.request}. */
+  readonly withResponse?: boolean;
+};
+
+/**
+ * A parsed response with the transport facts a sub-client may need to report:
+ * the HTTP status and whether the server marked it an idempotent replay.
+ */
+export type HttpResult<T> = {
+  readonly data: T;
+  readonly status: number;
+  /** `true` when the server sent `Idempotent-Replay: true`: the stored answer to an earlier request. */
+  readonly idempotentReplay: boolean;
 };
 
 /**
@@ -173,8 +169,16 @@ export class KashHttpClient {
     this.fetchImpl = resolved;
   }
 
-  async request<T>(rawOpts: RequestOptions<T>): Promise<T> {
+  /**
+   * Send a request and return its parsed body. With `withResponse: true` it
+   * returns the body with the HTTP status and the `Idempotent-Replay` flag,
+   * for the few methods whose result reports them.
+   */
+  request<T>(opts: RequestOptions<T> & { readonly withResponse: true }): Promise<HttpResult<T>>;
+  request<T>(opts: RequestOptions<T>): Promise<T>;
+  async request<T>(rawOpts: RequestOptions<T>): Promise<T | HttpResult<T>> {
     if (rawOpts.idempotencyKey !== undefined) validateIdempotencyKey(rawOpts.idempotencyKey);
+    if (rawOpts.account !== undefined) validateUuid(rawOpts.account, 'account');
 
     // Auto-key an unkeyed POST so this method's own retries cannot duplicate a
     // write. See `autoIdempotencyKey`. Resolved here — once, outside the retry
@@ -195,8 +199,8 @@ export class KashHttpClient {
     // Layering: client-config headers, then per-call headers, then
     // SDK-managed headers overwrite all. SDK headers (`X-API-Key`,
     // `User-Agent`, `Content-Type`, `Accept`, `Idempotency-Key`,
-    // `X-Kash-Api-Version`) always win — `traceparent`, proxy auth,
-    // tenant tags, etc. are honoured.
+    // `X-Kash-Api-Version`, `Kash-Account`) always win — `traceparent`,
+    // proxy auth, tenant tags, etc. are honoured.
     const perCallHeaders = opts.headers ? sanitizeCustomHeaders(opts.headers) : undefined;
     const headers: Record<string, string> = {
       ...this.customHeaders,
@@ -215,13 +219,17 @@ export class KashHttpClient {
     if (this.apiKey) headers['X-API-Key'] = this.apiKey;
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
     if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
-    // Conditional GET: only for a URL this client has an ETag for. Read once,
-    // outside the retry loop, so every attempt of one call revalidates the same
-    // remembered body.
-    const conditionalUrl =
-      opts.method === 'GET' && this.conditionalCache !== null ? url : undefined;
+    if (opts.account !== undefined) headers['Kash-Account'] = opts.account;
+    // Conditional GET: only for a request this client has an ETag for. Read
+    // once, outside the retry loop, so every attempt of one call revalidates
+    // the same remembered body. The account is part of the key: one URL serves
+    // a different representation for each account it acts for.
+    const conditionalKey =
+      opts.method === 'GET' && this.conditionalCache !== null
+        ? conditionalCacheKey(url, opts.account)
+        : undefined;
     const remembered =
-      conditionalUrl === undefined ? undefined : this.conditionalCache?.get(conditionalUrl);
+      conditionalKey === undefined ? undefined : this.conditionalCache?.get(conditionalKey);
     if (remembered !== undefined) headers['If-None-Match'] = remembered.etag;
 
     const init: RequestInit = {
@@ -239,6 +247,9 @@ export class KashHttpClient {
 
     let attempt = 0;
     let lastErr: KashError | undefined;
+    // Wall clock (not performance.now): the cutoff is about the server's claim
+    // age, which began no earlier than this call's first send.
+    const callStartedAt = Date.now();
     // The retry loop runs at most `maxRetries + 1` times (initial
     // attempt + retries). Each iteration either returns the parsed
     // body, throws a non-retryable error, or schedules a backoff.
@@ -268,7 +279,7 @@ export class KashHttpClient {
           opts.schema,
           timeoutMs,
           opts.signal,
-          conditionalUrl,
+          conditionalKey,
           remembered
         );
         this.fireResponse(
@@ -284,7 +295,12 @@ export class KashHttpClient {
           result.deprecation,
           result.notModified
         );
-        return result.data;
+        if (rawOpts.withResponse !== true) return result.data;
+        return {
+          data: result.data,
+          status: result.status,
+          idempotentReplay: result.idempotentReplay,
+        };
       } catch (err) {
         const wrapped = err instanceof KashError ? err : wrapUnknown(err);
         const decorated = this.decorate(wrapped, opts.method, opts.path, attempt);
@@ -305,7 +321,7 @@ export class KashHttpClient {
         );
 
         // Caller-driven aborts and other non-retryables stop here.
-        if (!decorated.isRetryable || attempt >= maxRetries) {
+        if (!isRetryableFor(decorated, opts.idempotencyKey) || attempt >= maxRetries) {
           this.fireError(opts, url, attempt, decorated, durationMs);
           throw decorated;
         }
@@ -322,6 +338,16 @@ export class KashHttpClient {
           this.retryAfterMaxMs
         );
         if (delay === RETRY_AFTER_EXCEEDS_CAP) {
+          this.fireError(opts, url, attempt, decorated, durationMs);
+          throw decorated;
+        }
+        // Never retry an in-progress claim at or after the cutoff: from the
+        // claim's expiry the API lets a new request take the key over and run
+        // the work again. See IN_PROGRESS_RETRY_CUTOFF_MS.
+        if (
+          decorated.code === 'IDEMPOTENCY_REQUEST_IN_PROGRESS' &&
+          Date.now() + delay - callStartedAt >= IN_PROGRESS_RETRY_CUTOFF_MS
+        ) {
           this.fireError(opts, url, attempt, decorated, durationMs);
           throw decorated;
         }
@@ -459,7 +485,7 @@ export class KashHttpClient {
     schema: z.ZodType<T>,
     timeoutMs: number,
     callerSignal: AbortSignal | undefined,
-    conditionalUrl: string | undefined,
+    conditionalKey: string | undefined,
     remembered: ConditionalCacheEntry | undefined
   ): Promise<{
     data: T;
@@ -590,7 +616,7 @@ export class KashHttpClient {
         statusCode: response.status,
       });
     }
-    if (conditionalUrl !== undefined) this.remember(conditionalUrl, response, json);
+    if (conditionalKey !== undefined) this.remember(conditionalKey, response, json);
     return {
       data: parsed.data,
       status,
@@ -605,13 +631,13 @@ export class KashHttpClient {
 
   /**
    * Store (or forget) the body of a successful GET for revalidation. A
-   * response without an `ETag` forgets the URL: the remembered tag described a
+   * response without an `ETag` forgets the key: the remembered tag described a
    * representation the server has since stopped validating.
    */
-  private remember(url: string, response: Response, json: unknown): void {
+  private remember(key: string, response: Response, json: unknown): void {
     const etag = response.headers.get('etag');
-    if (etag) this.conditionalCache?.set(url, { etag, body: json });
-    else this.conditionalCache?.delete(url);
+    if (etag) this.conditionalCache?.set(key, { etag, body: json });
+    else this.conditionalCache?.delete(key);
   }
 
   private async classifyResponse(response: Response): Promise<KashError> {
@@ -629,8 +655,7 @@ export class KashHttpClient {
       contentType.includes('application/json')
     ) {
       try {
-        const body = (await response.json()) as ProblemDetailsLike;
-        if (body && typeof body === 'object') problem = body;
+        problem = parseProblemDetails(await response.json());
       } catch {
         // Body wasn't JSON despite the content-type — fall through
         // with an empty problem object so the status-based classifier
@@ -689,90 +714,6 @@ export class KashHttpClient {
     }
     return undefined;
   }
-}
-
-/**
- * Parse the rate-limit response headers (`X-RateLimit-Limit`,
- * `X-RateLimit-Remaining`, `X-RateLimit-Reset`) into a typed object.
- * Returns `null` when any header is missing or non-numeric — we don't
- * surface partial state because partial state is a footgun (a
- * `remaining: 0` without context could be misread as "I'm rate-limited").
- *
- * The Kash API attaches all three on every response from a rate-limited
- * route.
- *
- * **Header lookup case**: lowercase keys are intentional and match the
- * Fetch spec — `Headers.prototype.get` is case-insensitive (see
- * https://fetch.spec.whatwg.org/#dom-headers-get). Using one canonical
- * casing here keeps maintenance straightforward; future maintainers
- * should NOT add uppercase variants for the same logical header.
- */
-function parseRateLimitHeaders(response: Response): RateLimitState | null {
-  const limit = response.headers.get('x-ratelimit-limit');
-  const remaining = response.headers.get('x-ratelimit-remaining');
-  const reset = response.headers.get('x-ratelimit-reset');
-  if (!limit || !remaining || !reset) return null;
-  const limitN = Number(limit);
-  const remainingN = Number(remaining);
-  const resetN = Number(reset);
-  if (!Number.isFinite(limitN) || !Number.isFinite(remainingN) || !Number.isFinite(resetN)) {
-    return null;
-  }
-  return {
-    limit: Math.trunc(limitN),
-    remaining: Math.max(0, Math.trunc(remainingN)),
-    resetSeconds: Math.max(0, Math.trunc(resetN)),
-  };
-}
-
-/**
- * Parse the `Idempotent-Replay` response header. The server emits
- * `Idempotent-Replay: true` only when the response is a cached replay
- * of an earlier idempotent request; absence (or any other value)
- * means a fresh execution.
- */
-function parseIdempotentReplayHeader(response: Response): boolean {
-  return response.headers.get('idempotent-replay') === 'true';
-}
-
-/**
- * Parse the `Sunset` (RFC 8594), `Deprecation`
- * (draft-ietf-httpapi-deprecation-header), and `Link rel="sunset"`
- * response headers into a structured advisory. Returns `null` when
- * none of the three headers are present (the steady-state case).
- *
- * The `Link` header may contain multiple semicolon-separated relations;
- * only the first match with `rel="sunset"` is surfaced. The bare URL
- * is extracted from `<URL>` per RFC 8288.
- */
-function parseDeprecationHeaders(response: Response): {
-  sunset: string | undefined;
-  deprecation: string | undefined;
-  link: string | undefined;
-} | null {
-  const sunset = response.headers.get('sunset') ?? undefined;
-  const deprecation = response.headers.get('deprecation') ?? undefined;
-  const linkHeader = response.headers.get('link');
-  let link: string | undefined;
-  if (linkHeader) {
-    // Split on commas not inside angle brackets — RFC 8288 allows
-    // multiple Link values in one header. For each value, parse the
-    // `<URL>` then look up the `rel` parameter (quoted or not). Per
-    // RFC 8288 §3.3 `rel` is a space-separated set of relation
-    // types — `rel="preload sunset"` is valid and refers to the same
-    // target — so we tokenise the value and look for `sunset`.
-    for (const candidate of linkHeader.split(/,(?=\s*<)/)) {
-      const m = candidate.match(/<([^>]+)>[^,]*\brel\s*=\s*(?:"([^"]*)"|(\S+))/i);
-      if (!m || !m[1]) continue;
-      const relValue = m[2] ?? m[3] ?? '';
-      if (relValue.split(/\s+/).includes('sunset')) {
-        link = m[1].trim();
-        break;
-      }
-    }
-  }
-  if (!sunset && !deprecation && !link) return null;
-  return { sunset, deprecation, link };
 }
 
 class TimeoutSentinel extends Error {
@@ -849,21 +790,31 @@ function computeDelayMs(
   return Math.floor(Math.random() * exp);
 }
 
-/**
- * Pull the parsed `Retry-After` (seconds) off the error if present.
- * Both `KashRateLimitError` (429) and `KashMaintenanceError` (503
- * maintenance) carry it.
- */
+/** The parsed `Retry-After` (seconds) every `KashError` carries, when the response sent one. */
 function retryAfterFromError(err: KashError): number | undefined {
-  if (err instanceof KashRateLimitError) return err.retryAfterSeconds;
-  // Use a structural check rather than `instanceof KashMaintenanceError`
-  // to avoid an import cycle and to keep this helper colocated with
-  // the retry logic. The shape is documented on the class.
-  const ra = (err as { retryAfterSeconds?: number }).retryAfterSeconds;
-  return typeof ra === 'number' ? ra : undefined;
+  return err.retryAfterSeconds;
+}
+
+/**
+ * Whether the loop may try again. Beyond the error's own `isRetryable`, a
+ * `409 IDEMPOTENCY_REQUEST_IN_PROGRESS` on a KEYED request is retried: it
+ * means an earlier attempt with the same key is still running on the server,
+ * which this loop itself causes when an attempt times out (client
+ * `timeoutMs` 30 s against the server's 60 s claim). Retrying with the same
+ * key returns that attempt's answer once it finishes, and can never act
+ * twice. A request without a key is never retried on it.
+ */
+function isRetryableFor(err: KashError, idempotencyKey: string | undefined): boolean {
+  // The API answers in-progress with a short Retry-After (at most 5 s), so
+  // the SDK polls while the claim is held; without one (an older API) the
+  // backoff is short and the budget may run out first. Either way the
+  // conflict can reach the caller: read the resource before retrying.
+  if (err.isRetryable) return true;
+  return idempotencyKey !== undefined && err.code === 'IDEMPOTENCY_REQUEST_IN_PROGRESS';
 }
 
 function retryReason(err: KashError): RetryHookEvent['reason'] {
+  if (err.code === 'IDEMPOTENCY_REQUEST_IN_PROGRESS') return 'idempotency_in_progress';
   if (err instanceof KashRateLimitError) return 'rate_limit';
   if (err instanceof KashTimeoutError) return 'timeout';
   if (err instanceof KashNetworkError) return 'network';
@@ -873,7 +824,7 @@ function retryReason(err: KashError): RetryHookEvent['reason'] {
 function formatZodIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return error.message;
-  const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
+  const path = issue.path.length > 0 ? joinIssuePath(issue.path) : '(root)';
   return `${path}: ${issue.message}`;
 }
 
@@ -898,113 +849,6 @@ function safeFire<E>(handler: (event: E) => void, event: E): void {
   } catch {
     // Intentional swallow. See the doc comment.
   }
-}
-
-/**
- * Strip SDK-controlled header names from the consumer's custom
- * header bag (case-insensitive). Belt-and-suspenders alongside the
- * "SDK headers overwrite custom headers" ordering in `request()`:
- * removing them here means the merged bag is small and
- * `Object.assign` can't accidentally re-promote them via key order.
- */
-const SDK_RESERVED_HEADER_NAMES_LOWER = new Set([
-  'accept',
-  'user-agent',
-  'x-api-key',
-  'content-type',
-  'idempotency-key',
-  'kash-version',
-  // Managed by the conditional-GET cache: a caller-supplied validator would
-  // produce a 304 the SDK has no remembered body for.
-  'if-none-match',
-]);
-
-/**
- * Server-enforced `Idempotency-Key` constraints:
- *
- *   - Max 255 characters (`IDEMPOTENCY_KEY_TOO_LONG`).
- *   - Allowed alphabet `[A-Za-z0-9_\-:.]+` — letters, digits, underscore,
- *     hyphen, colon, dot. Whitespace, control chars, semicolons, slashes,
- *     equals signs, unicode, surrogate pairs are all rejected
- *     (`IDEMPOTENCY_KEY_FORMAT_INVALID`).
- *
- * Fail fast on the client so the consumer hits the bug at the call site
- * rather than after a round trip.
- */
-const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_\-:.]+$/;
-
-/**
- * An `Idempotency-Key` for a POST the caller did not key themselves.
- *
- * The SDK retries a POST on connection errors, timeouts and 5xx — measured
- * three attempts of `POST /v1/trades` from a single `trades.create()` when
- * `fetch` throws transiently. A transport error is NOT evidence the server did
- * nothing: a reset while reading the response leaves a trade created and the
- * client believing it failed, so an unkeyed retry places a SECOND real trade.
- * `idempotencyKey` and `clientRequestId` are both optional and the README
- * offers them as a convenience ("pick one or both"), which left the SDK's own
- * advertised resilience as the thing that could duplicate a customer's money.
- *
- * Generated ONCE per logical request, before the retry loop, so every attempt
- * of one call carries the same key and distinct calls carry distinct keys —
- * the server replays the original response instead of executing again. A
- * caller-supplied key always wins; this only fills the gap.
- *
- * Returns `undefined` when no randomness source exists, which is NOT treated
- * as "generate nothing and carry on": `request` drops maxRetries to 0 for that
- * POST rather than repeating an unprotected write (`.claude/rules/failed-reads.md`).
- * `crypto.randomUUID` is secure-context-only in browsers, so `getRandomValues`
- * — which is not — is a real fallback rather than a formality.
- */
-function autoIdempotencyKey(): string | undefined {
-  const c = globalThis.crypto as Partial<Crypto> | undefined;
-  if (typeof c?.randomUUID === 'function') return c.randomUUID();
-  if (typeof c?.getRandomValues === 'function') {
-    const bytes = c.getRandomValues(new Uint8Array(16));
-    let hex = '';
-    for (const b of bytes) hex += b.toString(16).padStart(2, '0');
-    return `sdk-auto-${hex}`;
-  }
-  return undefined;
-}
-
-function validateIdempotencyKey(key: string): void {
-  if (typeof key !== 'string' || key.length === 0) {
-    throw new KashValidationError('idempotencyKey must be a non-empty string.', {
-      code: 'SDK_VALIDATION',
-    });
-  }
-  if (key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
-    throw new KashValidationError(
-      `idempotencyKey is ${key.length} chars; the server caps it at ${IDEMPOTENCY_KEY_MAX_LENGTH}.`,
-      { code: 'IDEMPOTENCY_KEY_TOO_LONG' }
-    );
-  }
-  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
-    // Pinpoint the first offending character so the consumer can
-    // edit-fix at the call site rather than guessing.
-    const badIndex = [...key].findIndex((c) => !/^[A-Za-z0-9_\-:.]$/.test(c));
-    const badChar = badIndex >= 0 ? JSON.stringify(key[badIndex]) : '<unknown>';
-    throw new KashValidationError(
-      `idempotencyKey contains ${badChar} at position ${badIndex}; ` +
-        'allowed alphabet: A-Z, a-z, 0-9, `_`, `-`, `:`, `.`. ' +
-        'Whitespace, control chars, and unicode are rejected by the server.',
-      { code: 'IDEMPOTENCY_KEY_FORMAT_INVALID' }
-    );
-  }
-}
-
-function sanitizeCustomHeaders(
-  headers: Record<string, string> | undefined
-): Readonly<Record<string, string>> {
-  if (!headers) return Object.freeze({});
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(headers)) {
-    if (SDK_RESERVED_HEADER_NAMES_LOWER.has(name.toLowerCase())) continue;
-    out[name] = value;
-  }
-  return Object.freeze(out);
 }
 
 export type {

@@ -35,6 +35,7 @@ import { KashClient } from '../../src/client.js';
 const README_PATH = fileURLToPath(new URL('../../README.md', import.meta.url));
 const README = readFileSync(README_PATH, 'utf8');
 
+/** `method` may be a dotted path into a nested namespace: `withdrawals.quote`. */
 type Reference = { readonly subclient: string; readonly method: string };
 
 /**
@@ -46,14 +47,16 @@ type Reference = { readonly subclient: string; readonly method: string };
  *
  * Method names are limited to identifier characters and exclude `(`
  * tokens — `kash.markets.list()` and `kash.markets.list` both extract
- * to `{markets, list}`.
+ * to `{markets, list}`. A nested namespace extracts with its path:
+ * `kash.partnerAccounts.withdrawals.quote()` is
+ * `{partnerAccounts, withdrawals.quote}`.
  */
 function extractReferences(text: string): readonly Reference[] {
   // Variable names commonly used in README examples for a KashClient
   // instance. Add new ones here if the README starts using them.
   const variableNames = ['kash', 'client', 'test', 'live', 'probe'];
   const pattern = new RegExp(
-    `\\b(?:${variableNames.join('|')})\\.([a-zA-Z_]+)\\.([a-zA-Z_]+)\\b`,
+    `\\b(?:${variableNames.join('|')})\\.([a-zA-Z_]+)\\.([a-zA-Z_]+(?:\\.[a-zA-Z_]+)?)\\b`,
     'g'
   );
   const refs = new Map<string, Reference>();
@@ -73,6 +76,8 @@ const KNOWN_SUBCLIENTS = new Set([
   'portfolio',
   'webhooks',
   'account',
+  'balance',
+  'partnerAccounts',
 ]);
 
 /**
@@ -106,6 +111,9 @@ describe('packages/sdk/README.md ↔ KashClient surface drift', () => {
     expect(refKeys.has('markets.list'), 'README must reference kash.markets.list').toBe(true);
     expect(refKeys.has('trades.create'), 'README must reference kash.trades.create').toBe(true);
     expect(refKeys.has('webhooks.list'), 'README must reference kash.webhooks.list').toBe(true);
+    // A nested reference is read with its full path, not cut at the namespace.
+    expect(refKeys.has('partnerAccounts.withdrawals.create')).toBe(true);
+    expect(refKeys.has('partnerAccounts.withdrawals')).toBe(false);
   });
 
   it.each(Array.from(KNOWN_SUBCLIENTS).map((s) => [s] as const))(
@@ -137,7 +145,12 @@ describe('packages/sdk/README.md ↔ KashClient surface drift', () => {
       // customer who copied that line.
       const sub = (client as unknown as Record<string, unknown>)[subclient];
       expect(sub, `sub-client "${subclient}" missing on KashClient`).toBeDefined();
-      const fn = (sub as Record<string, unknown>)[method];
+      const fn = method
+        .split('.')
+        .reduce<unknown>(
+          (owner, key) => (owner as Record<string, unknown> | undefined)?.[key],
+          sub
+        );
       expect(
         typeof fn,
         `README references kash.${subclient}.${method}() but it doesn't exist on KashClient.${subclient}. ` +

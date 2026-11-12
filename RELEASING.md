@@ -57,7 +57,50 @@ Inside the monorepo, edit two files in lockstep:
 The unit test in `tests/unit/user-agent.test.ts` asserts the two stay
 in sync — the test fails if you forget one.
 
-Update `packages/sdk/CHANGELOG.md`: rename `[Unreleased]` to the new
+Before renaming anything in the CHANGELOG, check the public API against the
+last published version:
+
+```bash
+cd packages/sdk
+pnpm build
+pnpm tsx scripts/api-diff.ts --base <last published version> --check-changelog
+```
+
+The script packs the published version (`npm pack`) and this build
+(`pnpm pack`), installs each into a temporary project and runs two checks.
+
+1. **Types.** It compares every entry point's exports (every subpath in `package.json` `exports`) with the TypeScript
+   compiler API: removed exports, moved exports (same name, another entry point; compared at their new home), changed signatures (structurally, so
+   property order or print style does not count), and for each Zod schema
+   whether its parsed type or its schema object's own type (its Zod API,
+   such as `.Values`) changed. All of these are breaking.
+2. **Validation.** It runs a fixed corpus of inputs through every Zod
+   schema both builds export (`scripts/schema-corpus.ts`): a seed each
+   base schema accepts, generated from its own definition (zod 3 or zod 4
+   alike), then a fixed palette of values (null, empty and unknown strings,
+   id and date forms, numeric strings at several decimal precisions,
+   out-of-range numbers, wrong types) substituted at every path of the seed,
+   each key deleted and an unknown key added. It reports every input one
+   build accepts and the other rejects, or that both accept with different
+   parsed output (a changed default or transform). A schema it cannot seed
+   fails the check; `tests/unit/schema-corpus.private.test.ts` seeds every
+   schema of the current build, so the next release's base is known to
+   seed before it is published.
+
+Its report goes to stdout (or `--out <file>`). With `--check-changelog` it
+fails unless `[Unreleased]` lists exactly the exports the first check found
+under `### Breaking (API diff against <base>)`, and exactly the schemas the
+second found under `### Validation changes (schema corpus against <base>)`.
+It needs read access to the npm registry.
+
+What it cannot see: the corpus is a sample, so a validation change its
+palette does not reach goes unreported, and neither check sees behaviour
+outside the schemas, such as defaults the client fills in, timeouts, retry
+and backoff rules or how a response is classified as an error. Review the
+diff of `src/internal/` and `src/clients/` against the last release tag for
+those, and describe each change under Changed.
+
+Then update `packages/sdk/CHANGELOG.md`: rename `[Unreleased]` to the new
 version + date, leave a fresh empty `[Unreleased]` heading on top.
 
 Land on monorepo `main`.

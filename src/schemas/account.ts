@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 
-import { MetaSchema } from './common.js';
+import { MetaSchema } from './envelope.js';
 
 const tradeWindowSchema = z.object({
   total: z.number().int().nonnegative(),
@@ -24,9 +24,9 @@ const tradeWindowWithLatencySchema = tradeWindowSchema.extend({
 });
 
 export const AccountUsageSchema = z.object({
-  apiKeyId: z.string().uuid(),
+  apiKeyId: z.guid(),
   /** Server timestamp at query time. */
-  generatedAt: z.string().datetime(),
+  generatedAt: z.iso.datetime(),
   trades: z.object({
     '24h': tradeWindowWithLatencySchema,
     '7d': tradeWindowSchema,

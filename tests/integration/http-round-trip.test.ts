@@ -177,7 +177,7 @@ describe('http-round-trip', () => {
     routes.set('GET /v1/markets', (req, res) => {
       const requestId = (req.headers['x-request-id'] as string | undefined) ?? 'stub-req-2';
       const apiKey = req.headers['x-api-key'] as string | undefined;
-      const kashVersion = req.headers['kash-version'] as string | undefined;
+      const kashVersion = req.headers['x-kash-api-version'] as string | undefined;
       // Echo the key + version into the response body so test can assert on them.
       jsonReply(
         res,
@@ -253,9 +253,9 @@ describe('http-round-trip', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 2. markets.list() sends X-API-Key, Kash-Version, X-Request-ID
+  // 2. markets.list() sends X-API-Key, X-Kash-Api-Version, X-Request-ID
   // -------------------------------------------------------------------------
-  it('markets.list — sends X-API-Key, Kash-Version, and X-Request-ID headers', async () => {
+  it('markets.list — sends X-API-Key, X-Kash-Api-Version, and X-Request-ID headers', async () => {
     // Capture raw requests on the server side to verify headers.
     const capturedHeaders: Record<string, string | string[] | undefined> = {};
 
@@ -293,9 +293,9 @@ describe('http-round-trip', () => {
       // SDK must inject X-API-Key on every request.
       expect(capturedHeaders['x-api-key']).toBe('kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
 
-      // SDK must inject a Kash-Version (ISO date format).
-      expect(typeof capturedHeaders['kash-version']).toBe('string');
-      expect(capturedHeaders['kash-version'] as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // SDK must inject X-Kash-Api-Version (ISO date format).
+      expect(typeof capturedHeaders['x-kash-api-version']).toBe('string');
+      expect(capturedHeaders['x-kash-api-version'] as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
       // SDK must inject a User-Agent.
       expect(capturedHeaders['user-agent'] as string).toContain('@kashdao/sdk');

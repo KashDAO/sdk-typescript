@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { buildPage, Page } from '../../src/internal/pagination.js';
 
-import type { Pagination } from '../../src/schemas/common.js';
+import type { Pagination } from '../../src/schemas/envelope.js';
 
 type Item = { readonly id: number };
 

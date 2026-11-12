@@ -6,15 +6,16 @@
 
 import { z } from 'zod';
 
-import { MetaSchema, PaginationSchema } from './common.js';
+import { openEnum } from './_open-enum.js';
+import { MetaSchema, PaginationSchema } from './envelope.js';
 
 export const RedeliverWebhookEventSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   eventType: z.string(),
-  apiKeyId: z.string().uuid(),
-  tradeRequestId: z.string().uuid().nullable(),
-  emittedAt: z.string().datetime(),
-  lastDeliveredAt: z.string().datetime().nullable(),
+  apiKeyId: z.guid(),
+  tradeRequestId: z.guid().nullable(),
+  emittedAt: z.iso.datetime(),
+  lastDeliveredAt: z.iso.datetime().nullable(),
   deliveryAttempts: z.number().int().nonnegative(),
 });
 
@@ -35,8 +36,8 @@ export type RedeliverWebhookResponse = z.infer<typeof RedeliverWebhookResponseSc
 
 const WebhookSecretSchema = z.object({
   secret: z.string(),
-  rotatedAt: z.string().datetime(),
-  previousRetainedUntil: z.string().datetime(),
+  rotatedAt: z.iso.datetime(),
+  previousRetainedUntil: z.iso.datetime(),
 });
 
 export const RotateWebhookSecretResponseSchema = z.object({
@@ -66,21 +67,21 @@ export type RotateWebhookSecretResponse = z.infer<typeof RotateWebhookSecretResp
  *   - `failed`     — terminal failure; no further auto-retry
  */
 export const WebhookEventResourceSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   eventType: z.string(),
-  tradeRequestId: z.string().uuid().nullable(),
-  emittedAt: z.string().datetime(),
-  outboxEmittedAt: z.string().datetime().nullable(),
+  tradeRequestId: z.guid().nullable(),
+  emittedAt: z.iso.datetime(),
+  outboxEmittedAt: z.iso.datetime().nullable(),
   replayCount: z.number().int().nonnegative(),
-  status: z.enum(['none', 'pending', 'delivered', 'retrying', 'failed']),
+  status: openEnum(['none', 'pending', 'delivered', 'retrying', 'failed']),
   delivery: z.object({
     attempts: z.number().int().nonnegative(),
-    lastAttemptedAt: z.string().datetime().nullable(),
-    lastDeliveredAt: z.string().datetime().nullable(),
+    lastAttemptedAt: z.iso.datetime().nullable(),
+    lastDeliveredAt: z.iso.datetime().nullable(),
     lastStatusCode: z.number().int().nullable(),
     lastFailureCode: z.string().nullable(),
     lastErrorMessage: z.string().nullable(),
-    terminalFailureAt: z.string().datetime().nullable(),
+    terminalFailureAt: z.iso.datetime().nullable(),
   }),
 });
 

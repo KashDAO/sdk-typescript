@@ -37,16 +37,12 @@ const README_PATH = fileURLToPath(new URL('../../README.md', import.meta.url));
 const README = readFileSync(README_PATH, 'utf8');
 
 /**
- * Pull every field name from the schema's `.shape` accessor. Works
- * across Zod major versions because `_def.shape()` is the canonical
- * lazy accessor — same pattern as round AV (api-tiers cell
- * extraction) and BD (retry defaults).
+ * Every field name, from the schema's public `.shape`. (This read the
+ * zod 3 internal `_def.shape()` until the SDK moved to zod 4, which has
+ * no such function; `.shape` is public in both.)
  */
 function getSchemaFields(): readonly string[] {
-  const shape = (
-    kashClientConfigSchema as unknown as { _def: { shape: () => Record<string, unknown> } }
-  )._def.shape();
-  return Object.keys(shape);
+  return Object.keys(kashClientConfigSchema.shape);
 }
 
 const SCHEMA_FIELDS = getSchemaFields();

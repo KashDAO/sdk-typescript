@@ -20,7 +20,8 @@
  *     user has no wallet yet.
  */
 
-import { KashValidationError } from '../errors.js';
+import { parseRequestBody } from '../internal/request-body.js';
+import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import {
   CreateRedemptionBodySchema,
   CreateRedemptionResponseSchema,
@@ -28,9 +29,13 @@ import {
   type RedemptionResource,
 } from '../schemas/redemption.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
+import type { KashHttpClient } from '../internal/http.js';
 
-export type CreateRedemptionOptions = RequestOverrides & {
+/**
+ * Options for {@link RedemptionsClient.create}. `account` names the partner
+ * account whose position is redeemed (see {@link AccountRequestOverrides}).
+ */
+export type CreateRedemptionOptions = AccountRequestOverrides & {
   /** Forwarded as the `Idempotency-Key` HTTP header. Auto-generated when omitted. */
   readonly idempotencyKey?: string;
 };
@@ -60,30 +65,15 @@ export class RedemptionsClient {
     body: CreateRedemptionBody,
     opts: CreateRedemptionOptions = {}
   ): Promise<RedemptionCreateResult> {
-    const parsed = CreateRedemptionBodySchema.safeParse(body);
-    if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => ({
-        path: i.path.join('.'),
-        message: i.message,
-        code: i.code,
-      }));
-      const lead = issues[0];
-      const summary = lead
-        ? `${lead.path || '(root)'}: ${lead.message}`
-        : 'invalid redemption body';
-      throw new KashValidationError(`redemptions.create: ${summary}`, {
-        code: 'VALIDATION_FAILED',
-        issues,
-      });
-    }
+    const parsed = parseRequestBody(CreateRedemptionBodySchema, body, 'redemptions.create');
     const { idempotencyKey, ...rest } = opts;
     const response = await this.http.request({
       path: '/redemptions',
       method: 'POST',
       schema: CreateRedemptionResponseSchema,
-      body: parsed.data,
+      body: parsed,
       ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
-      ...rest,
+      ...accountOverrides(rest),
     });
     return { ...response.redemption, idempotent: response._meta.idempotent };
   }

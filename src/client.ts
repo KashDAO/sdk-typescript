@@ -23,7 +23,9 @@
 import { z } from 'zod';
 
 import { AccountClient } from './clients/account.js';
+import { BalanceClient } from './clients/balance.js';
 import { MarketsClient } from './clients/markets.js';
+import { PartnerAccountsClient } from './clients/partner-accounts.js';
 import { PortfolioClient } from './clients/portfolio.js';
 import { QuotesClient } from './clients/quotes.js';
 import { RedemptionsClient } from './clients/redemptions.js';
@@ -38,9 +40,12 @@ import {
   type KashClientConfigInput,
 } from './internal/config.js';
 import { KashHttpClient } from './internal/http.js';
+import { pathSegment } from './internal/zod-issues.js';
+import { openEnum } from './schemas/_open-enum.js';
 
 const healthCheckResponseSchema = z.object({
-  status: z.enum(['ok', 'degraded', 'down']).optional(),
+  // Open: a new status must not turn a healthy answer into `ok: false`.
+  status: openEnum(['ok', 'degraded', 'down']).optional(),
   service: z.string().optional(),
   version: z.string().optional(),
 });
@@ -67,6 +72,10 @@ export class KashClient {
   readonly portfolio: PortfolioClient;
   readonly webhooks: WebhooksClient;
   readonly account: AccountClient;
+  /** The acting account's USDC: `GET /v1/balance`. */
+  readonly balance: BalanceClient;
+  /** Partner keys only: the accounts you hold for your users, and their withdrawals. */
+  readonly partnerAccounts: PartnerAccountsClient;
 
   /**
    * The validated, normalised config — exposed read-only for
@@ -97,6 +106,8 @@ export class KashClient {
     this.portfolio = new PortfolioClient(this.http);
     this.webhooks = new WebhooksClient(this.http);
     this.account = new AccountClient(this.http);
+    this.balance = new BalanceClient(this.http);
+    this.partnerAccounts = new PartnerAccountsClient(this.http);
   }
 
   /**
@@ -182,7 +193,7 @@ export class KashClient {
  */
 function configurationErrorFromZod(error: z.ZodError): KashConfigurationError {
   const issues = error.issues.map((i) => ({
-    path: [...i.path],
+    path: i.path.map(pathSegment),
     message: i.message,
   }));
   const first = issues[0];

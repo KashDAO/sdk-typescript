@@ -10,9 +10,10 @@
 import { z } from 'zod';
 
 import { publicChainIdSchema } from './_chain.js';
-import { MetaSchema, PaginationSchema } from './common.js';
+import { openEnum } from './_open-enum.js';
+import { MetaSchema, PaginationSchema } from './envelope.js';
 
-export const MarketStatusSchema = z.enum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']);
+export const MarketStatusSchema = openEnum(['UNSEEDED', 'ACTIVE', 'RESOLVED', 'ABANDONED']);
 export type MarketStatus = z.infer<typeof MarketStatusSchema>;
 
 export const MarketOutcomeSchema = z.object({
@@ -23,7 +24,7 @@ export const MarketOutcomeSchema = z.object({
 
 export type MarketOutcome = z.infer<typeof MarketOutcomeSchema>;
 
-export const MarketResolutionStateSchema = z.enum([
+export const MarketResolutionStateSchema = openEnum([
   'resolving',
   'proposed',
   'settling',
@@ -38,7 +39,7 @@ export type MarketResolutionState = z.infer<typeof MarketResolutionStateSchema>;
  * positions are refundable through redemption), `inactive` (the status is not
  * one that trades), `frozen` (the freeze deadline has passed).
  */
-export const MarketNotTradeableReasonSchema = z.enum([
+export const MarketNotTradeableReasonSchema = openEnum([
   'resolved',
   'cancelled',
   'inactive',
@@ -65,8 +66,12 @@ export const marketTradeabilityFields = {
   notTradeableReason: MarketNotTradeableReasonSchema.nullable().optional(),
 } as const;
 
+/** The chain family a market lives on. `chainRef` names the exact chain. */
+export const MarketChainFamilySchema = openEnum(['solana', 'evm']);
+export type MarketChainFamily = z.infer<typeof MarketChainFamilySchema>;
+
 export const MarketResourceSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   contractAddress: z.string(),
   /**
    * OPTIONAL from 0.2.0 (a required `number` through 0.1.5).
@@ -94,13 +99,13 @@ export const MarketResourceSchema = z.object({
   outcomeCount: z.number().int().positive(),
   outcomes: z.array(MarketOutcomeSchema),
   imageUrl: z.string().nullable(),
-  createdAt: z.string().datetime(),
-  expiresAt: z.string().datetime().nullable(),
+  createdAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime().nullable(),
   // Optional, not merely nullable: an API deployment older than the field
   // omits the key entirely. Requiring it would make every market fetch throw
   // KashValidationError against any environment that has not deployed it yet.
-  freezeAt: z.string().datetime().nullable().optional(),
-  resolvedAt: z.string().datetime().nullable(),
+  freezeAt: z.iso.datetime().nullable().optional(),
+  resolvedAt: z.iso.datetime().nullable(),
   // Dispute-window settlement state ("Ended — proposed outcome X — dispute
   // window ends at T"). Null when the market has no pending proposal.
   // Optional for the same forward-compat reason as `freezeAt`: an API
@@ -108,9 +113,9 @@ export const MarketResourceSchema = z.object({
   resolution: z
     .object({
       proposedOutcomeIndex: z.number().int().nonnegative(),
-      proposedAt: z.string().datetime().nullable(),
-      finalizableAt: z.string().datetime().nullable(),
-      settlementStatus: z.enum(['proposed', 'disputed', 'finalized', 'cancelled']),
+      proposedAt: z.iso.datetime().nullable(),
+      finalizableAt: z.iso.datetime().nullable(),
+      settlementStatus: openEnum(['proposed', 'disputed', 'finalized', 'cancelled']),
       disputeOpen: z.boolean(),
     })
     .nullable()
@@ -124,6 +129,16 @@ export const MarketResourceSchema = z.object({
    * `freezeAt`: an API deployment older than the field omits the key.
    */
   resolutionState: MarketResolutionStateSchema.nullable().optional(),
+  /**
+   * The category slug (`sports`, `crypto`), the value `category` filters on;
+   * null when the market has none. Present from API version 2026-08-19 on, and
+   * optional for the same forward-compat reason as `freezeAt`.
+   */
+  category: z.string().nullable().optional(),
+  /** The sub-category slug (`football`), the value `subcategory` filters on. */
+  subcategory: z.string().nullable().optional(),
+  /** The chain family, `solana` or `evm`, the value `chain` filters on. */
+  chain: MarketChainFamilySchema.optional(),
   ...marketTradeabilityFields,
 });
 
@@ -133,7 +148,14 @@ export type MarketResource = z.infer<typeof MarketResourceSchema>;
 export type ListMarketsParams = {
   readonly cursor?: string;
   readonly limit?: number;
-  readonly status?: MarketStatus;
+  /** A filter is a request value, so only the statuses this SDK knows are accepted. */
+  readonly status?: (typeof MarketStatusSchema.options)[number];
+  /** Only markets in this category slug (case-insensitive). */
+  readonly category?: string;
+  /** Only markets in this sub-category slug (case-insensitive). */
+  readonly subcategory?: string;
+  /** Only markets on this chain family. */
+  readonly chain?: (typeof MarketChainFamilySchema.options)[number];
 };
 
 export const ListMarketsResponseSchema = z.object({
@@ -180,9 +202,9 @@ export type GetMarketResponse = z.infer<typeof GetMarketResponseSchema>;
 export const PredictionResourceSchema = z.object({
   /** Trade row id. Stable; opaque to consumers. */
   id: z.string(),
-  marketId: z.string().uuid(),
+  marketId: z.guid(),
   outcomeIndex: z.number().int().nonnegative(),
-  side: z.enum(['buy', 'sell']),
+  side: openEnum(['buy', 'sell']),
   /** Atomic USDC paid in (buys only); null on sells. */
   usdcIn: z.string().nullable(),
   /** Atomic USDC paid out (sells only); null on buys. */
@@ -196,7 +218,7 @@ export const PredictionResourceSchema = z.object({
   /** Outcome probability after the trade — `[0, 1]` decimal string. */
   probability: z.string(),
   /** Block timestamp in ISO 8601. */
-  timestamp: z.string().datetime(),
+  timestamp: z.iso.datetime(),
   blockNumber: z.string(),
   transactionHash: z.string(),
   /**

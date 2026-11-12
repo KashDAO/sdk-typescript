@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { KashClient, MarketResourceSchema } from '../../src/index.js';
+import { KashClient } from '../../src/index.js';
+import { MarketResourceSchema } from '../../src/schemas/index.js';
 
 import { META } from './_test-utils.js';
 
@@ -51,6 +52,36 @@ describe('MarketsClient', () => {
     expect(url).toContain('/v1/markets');
     expect(url).toContain('status=ACTIVE');
     expect(url).toContain('limit=20');
+  });
+
+  it('list — sends category, subcategory and chain, and parses the fields back', async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse({
+        data: [{ ...MARKET, category: 'weather', subcategory: null, chain: 'evm' }],
+        pagination: { cursor: null, hasMore: false, limit: 20 },
+        _meta: META,
+      })
+    );
+    const kash = new KashClient({
+      apiKey: 'kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+      baseUrl: 'https://api.test.local/v1',
+      fetch: fetchSpy as typeof fetch,
+      maxRetries: 0,
+    });
+    const page = await kash.markets.list({
+      category: 'weather',
+      subcategory: 'rain',
+      chain: 'evm',
+    });
+    const url = new URL(fetchSpy.mock.calls[0]![0] as string);
+    expect(url.searchParams.get('category')).toBe('weather');
+    expect(url.searchParams.get('subcategory')).toBe('rain');
+    expect(url.searchParams.get('chain')).toBe('evm');
+    expect(page.data[0]).toMatchObject({ category: 'weather', subcategory: null, chain: 'evm' });
+    // Without them, no such parameter is sent.
+    await kash.markets.list({ status: 'ACTIVE' });
+    const plain = new URL(fetchSpy.mock.calls[1]![0] as string);
+    expect([...plain.searchParams.keys()].sort()).toEqual(['limit', 'status']);
   });
 
   it('list — async iteration walks every page', async () => {

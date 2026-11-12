@@ -22,8 +22,8 @@ import {
   type PendingTrade,
   type RejectedTrade,
   type TerminalTrade,
-  TradeStatusSchema,
 } from '../../src/index.js';
+import { TradeStatusSchema } from '../../src/schemas/index.js';
 import type { TradeResource, TradeStatus } from '../../src/index.js';
 
 function tradeWith(status: TradeStatus): TradeResource {

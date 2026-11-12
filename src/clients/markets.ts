@@ -9,6 +9,7 @@
  */
 
 import { buildPage, type Page } from '../internal/pagination.js';
+import { transportOverrides, type RequestOverrides } from '../internal/request-options.js';
 import {
   GetMarketResponseSchema,
   ListMarketsResponseSchema,
@@ -19,8 +20,8 @@ import {
   type PredictionResource,
 } from '../schemas/market.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
-import type { Pagination } from '../schemas/common.js';
+import type { KashHttpClient } from '../internal/http.js';
+import type { Pagination } from '../schemas/envelope.js';
 
 export class MarketsClient {
   constructor(private readonly http: KashHttpClient) {}
@@ -61,8 +62,15 @@ export class MarketsClient {
         path: '/markets',
         method: 'GET',
         schema: ListMarketsResponseSchema,
-        query: { cursor, limit, status: params.status },
-        ...opts,
+        query: {
+          cursor,
+          limit,
+          status: params.status,
+          category: params.category,
+          subcategory: params.subcategory,
+          chain: params.chain,
+        },
+        ...transportOverrides(opts),
       });
       return result;
     };
@@ -75,7 +83,7 @@ export class MarketsClient {
       path: `/markets/${encodeURIComponent(id)}`,
       method: 'GET',
       schema: GetMarketResponseSchema,
-      ...opts,
+      ...transportOverrides(opts),
     });
     return result.market;
   }
@@ -127,7 +135,7 @@ export class MarketsClient {
           side: params.side,
           outcomeIndex: params.outcomeIndex,
         },
-        ...opts,
+        ...transportOverrides(opts),
       });
       return result;
     };

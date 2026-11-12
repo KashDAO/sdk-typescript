@@ -112,6 +112,59 @@ describe('KashHttpClient.request', () => {
     expect(headers['X-Kash-Api-Version']).toBe('2026-05-02');
   });
 
+  it('a differently-cased x-kash-api-version is stripped, not sent beside the pin', async () => {
+    // The header bag is a plain object, so `x-kash-api-version` and the SDK's
+    // `X-Kash-Api-Version` are two keys and `fetch` would join them into
+    // "1999-01-01, 2026-05-02". Until 0.4.0 the reserved set listed
+    // `kash-version`, a header the SDK never sends, so this one survived.
+    const fetchSpy = vi.fn(async () => jsonResponse({ ok: true }));
+    const client = makeClient(fetchSpy as typeof fetch, {
+      apiVersion: '2026-05-02',
+      headers: { 'x-kash-api-version': '1999-01-01' },
+    });
+    await client.request({
+      path: '/ping',
+      method: 'GET',
+      schema: responseSchema,
+      headers: { 'X-KASH-API-VERSION': '1998-01-01' },
+    });
+    const headers = fetchSpy.mock.calls[0]![1]!.headers as Record<string, string>;
+    const versionKeys = Object.keys(headers).filter(
+      (k) => k.toLowerCase() === 'x-kash-api-version'
+    );
+    expect(versionKeys).toEqual(['X-Kash-Api-Version']);
+    expect(new Headers(headers).get('x-kash-api-version')).toBe('2026-05-02');
+  });
+
+  it('every header the SDK sets is reserved: no caller casing of one reaches the wire', async () => {
+    // Derives the managed set from a real request rather than a hand-kept
+    // list, so a header the SDK starts sending without reserving it fails
+    // here. A POST with a body and a key carries every managed header.
+    const probe = vi.fn(async () => jsonResponse({ ok: true }));
+    await makeClient(probe as typeof fetch).request({
+      path: '/ping',
+      method: 'POST',
+      schema: responseSchema,
+      body: {},
+      idempotencyKey: 'probe-key',
+    });
+    const managed = Object.keys(probe.mock.calls[0]![1]!.headers as Record<string, string>);
+    expect(managed).toContain('X-Kash-Api-Version');
+
+    const fetchSpy = vi.fn(async () => jsonResponse({ ok: true }));
+    const shadow = Object.fromEntries(managed.map((name) => [name.toLowerCase(), 'shadow']));
+    await makeClient(fetchSpy as typeof fetch).request({
+      path: '/ping',
+      method: 'POST',
+      schema: responseSchema,
+      body: {},
+      idempotencyKey: 'probe-key',
+      headers: shadow,
+    });
+    const sent = fetchSpy.mock.calls[0]![1]!.headers as Record<string, string>;
+    expect(Object.entries(sent).filter(([, v]) => v === 'shadow')).toEqual([]);
+  });
+
   it('onResponse — exposes parsed X-RateLimit-* state on success', async () => {
     const fetchSpy = vi.fn(
       async () =>
@@ -677,8 +730,7 @@ describe('KashHttpClient.request', () => {
 
     it('404 with JSON null body → KashError (no crash on null.code access)', async () => {
       // A body of literal `null` parses as JSON.parse('null') === null.
-      // The classifyResponse check `if (body && typeof body === 'object')`
-      // rejects null (`null && ...` is null/falsy), so problem stays `{}`.
+      // The problem-body schema refuses a non-object, so problem stays `{}`.
       // Status 404 classifies via empty problem.
       const fetchSpy = vi.fn(
         async () =>
@@ -695,6 +747,36 @@ describe('KashHttpClient.request', () => {
       // TypeError from "Cannot read properties of null".
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).constructor.name).toMatch(/^Kash/);
+    });
+
+    it('401 whose code is a NUMBER drops the code instead of crashing on startsWith', async () => {
+      // The body used to be cast to ProblemDetailsLike, so a proxy's numeric
+      // `code` reached the cross-mode hint's `code.startsWith(...)` and threw a
+      // TypeError out of the error path. The parse drops the mistyped member.
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(401, { code: 401, detail: 'unauthorised', proxyTrace: 'abc' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch, {
+        apiKey: 'kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        baseUrl: 'https://api.kash.bot/v1',
+      });
+      const err = await client
+        .request({ path: '/x', method: 'GET', schema: responseSchema })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashAuthenticationError);
+      expect((err as KashAuthenticationError).message).toContain('unauthorised');
+    });
+
+    it('keeps RFC 7807 extension members while dropping mistyped standard ones', async () => {
+      const fetchSpy = vi.fn(async () =>
+        problemResponse(409, { code: 'IDEMPOTENCY_CONFLICT', detail: 42, flag: 'trading' })
+      );
+      const client = makeClient(fetchSpy as typeof fetch);
+      const err = await client
+        .request({ path: '/x', method: 'POST', schema: responseSchema, body: {} })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashConflictError);
+      expect((err as KashConflictError).message).not.toContain('42');
     });
 
     it('429 with JSON string body (not object) → KashRateLimitError with Retry-After', async () => {

@@ -13,9 +13,10 @@
  * for both.
  */
 
+import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import { GetTraceResponseSchema, type TraceResource } from '../schemas/trace.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
+import type { KashHttpClient } from '../internal/http.js';
 
 export class TracesClient {
   constructor(private readonly http: KashHttpClient) {}
@@ -33,14 +34,15 @@ export class TracesClient {
    *
    * Throws {@link KashNotFoundError} if the correlation id is unknown
    * OR the API key does not own the trade behind it (same response —
-   * server prevents enumeration).
+   * server prevents enumeration). A partner key reads a trace of one of
+   * its accounts' trades by passing that account as `opts.account`.
    */
-  async get(correlationId: string, opts: RequestOverrides = {}): Promise<TraceResource> {
+  async get(correlationId: string, opts: AccountRequestOverrides = {}): Promise<TraceResource> {
     const result = await this.http.request({
       path: `/traces/${encodeURIComponent(correlationId)}`,
       method: 'GET',
       schema: GetTraceResponseSchema,
-      ...opts,
+      ...accountOverrides(opts),
     });
     return result.trace;
   }

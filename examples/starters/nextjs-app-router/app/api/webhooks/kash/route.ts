@@ -10,7 +10,7 @@
  */
 
 import { kash } from '@/lib/kash';
-import { KashWebhookSignatureError } from '@kashdao/sdk';
+import { isUnknownWebhookEvent, KashWebhookSignatureError } from '@kashdao/sdk';
 
 export const runtime = 'nodejs'; // Web Crypto works on edge too — switch to 'edge' if preferred
 
@@ -33,9 +33,15 @@ export async function POST(request: Request): Promise<Response> {
     throw err;
   }
 
+  // A type newer than this SDK version arrives as an UnknownWebhookEvent:
+  // acknowledge it and handle it after upgrading. Past that check,
   // event.type narrows event.data per variant. Dedupe on event.id
   // (operator-triggered redeliveries reuse the same id) before
   // dispatching to your business logic.
+  if (isUnknownWebhookEvent(event)) {
+    console.log(`webhook type not handled yet: ${event.type} (${event.id})`);
+    return new Response(null, { status: 204 });
+  }
   console.log(`webhook: ${event.type} (${event.id})`);
 
   return new Response(null, { status: 204 });

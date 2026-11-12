@@ -32,19 +32,16 @@ const README_PATH = fileURLToPath(new URL('../../README.md', import.meta.url));
 const README = readFileSync(README_PATH, 'utf8');
 
 /**
- * Walk the Zod schema's `.shape` to pull each field's default value.
- * The schema is built with `.default(N)` for retry knobs, so the
- * default sits under each field's `_def.defaultValue()`.
+ * A field's default, read through behaviour rather than Zod internals:
+ * parse an empty config and read the field back. (This read the zod 3
+ * internal `_def.defaultValue()` until the SDK moved to zod 4.)
  */
 function getZodDefault(field: string): unknown {
-  const shape = (
-    kashClientConfigSchema as unknown as { _def: { shape: () => Record<string, unknown> } }
-  )._def.shape();
-  const node = shape[field] as { _def: { defaultValue?: () => unknown } } | undefined;
-  if (!node || typeof node._def.defaultValue !== 'function') {
-    throw new Error(`Field "${field}" has no .default(...) — schema shape may have changed.`);
+  const parsed = kashClientConfigSchema.parse({}) as Record<string, unknown>;
+  if (parsed[field] === undefined) {
+    throw new Error(`Field "${field}" has no default — schema shape may have changed.`);
   }
-  return node._def.defaultValue();
+  return parsed[field];
 }
 
 describe('packages/sdk/README.md ↔ kashClientConfigSchema retry defaults', () => {

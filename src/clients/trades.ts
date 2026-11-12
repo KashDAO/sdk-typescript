@@ -15,9 +15,12 @@
  *     hit the high-value gate. The token is returned ONCE here.
  */
 
-import { KashConflictError, KashValidationError } from '../errors.js';
+import { KashConflictError, KashError } from '../errors.js';
+import { autoIdempotencyKey } from '../internal/idempotency-key.js';
 import { buildPage, type Page } from '../internal/pagination.js';
 import { pollUntil } from '../internal/polling.js';
+import { parseRequestBody } from '../internal/request-body.js';
+import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import {
   ConfirmTradeResponseSchema,
   CreateTradeBodySchema,
@@ -30,11 +33,18 @@ import {
   type TradeResource,
 } from '../schemas/trade.js';
 
-import type { KashHttpClient, RequestOverrides } from '../internal/http.js';
-import type { Pagination } from '../schemas/common.js';
+import type { KashHttpClient } from '../internal/http.js';
+import type { Pagination } from '../schemas/envelope.js';
 
-export type CreateTradeOptions = RequestOverrides & {
-  /** Forwarded as the `Idempotency-Key` HTTP header. */
+/**
+ * Options for {@link TradesClient.create}. `account` names the partner
+ * account the trade is for (see {@link AccountRequestOverrides}).
+ */
+export type CreateTradeOptions = AccountRequestOverrides & {
+  /**
+   * Forwarded as the `Idempotency-Key` HTTP header. When omitted, the SDK
+   * generates one for this call.
+   */
   readonly idempotencyKey?: string;
 };
 
@@ -65,12 +75,23 @@ export type TradeConfirmation = {
  * ```
  */
 export type TradeCreateResult = TradeResource & {
-  /** True iff this response is the cached result of a duplicate `Idempotency-Key`/`clientRequestId`. */
+  /**
+   * True iff this response is the API's replay of a trade already recorded
+   * under this `Idempotency-Key` or `clientRequestId`. That includes this
+   * call's own retries: when an earlier attempt of the same call recorded
+   * the trade but its response was lost (a timeout, a reset, a 503), the
+   * retry returns that trade with `idempotent: true`. It is still the one
+   * trade this call asked for.
+   */
   readonly idempotent: boolean;
   /**
-   * Present iff the trade hit the high-value confirmation gate. The
-   * token is returned once — capture it and call {@link TradesClient.confirm}
-   * before the trade can enter the pipeline.
+   * The token to release a trade held at the high-value confirmation gate
+   * (`status: 'pending_confirmation'`), for {@link TradesClient.confirm}.
+   * Present whenever such a trade can still be confirmed by this API key:
+   * on the first answer, and on a repeat of the call inside the confirmation
+   * window (the API then issues a new token and the earlier one stops
+   * working). Absent for a trade that did not hit the gate, and for a held
+   * trade whose window has passed or that another API key placed.
    */
   readonly confirmation?: TradeConfirmation;
 };
@@ -84,6 +105,8 @@ export type WaitForCompletionOptions = {
   readonly onStatus?: (trade: TradeResource) => void;
   /** Caller-driven abort. */
   readonly signal?: AbortSignal;
+  /** The partner account the trade belongs to, sent on every poll as `Kash-Account`. */
+  readonly account?: string;
 };
 
 export class TradesClient {
@@ -97,6 +120,12 @@ export class TradesClient {
    * trade hits the high-value gate, the result also carries
    * `confirmation.token` (returned ONCE); when it's a duplicate
    * idempotent request, `idempotent: true`.
+   *
+   * When `body.clientRequestId` is omitted the SDK sends one it generates,
+   * once per call and the same on every retry, so the API deduplicates the
+   * call's retries in the database (see the README, "Trades are
+   * deduplicated in the database"). The result's `clientRequestId` carries
+   * the id that was sent.
    *
    * @example
    * ```ts
@@ -112,29 +141,66 @@ export class TradesClient {
   async create(body: CreateTradeBody, opts: CreateTradeOptions = {}): Promise<TradeCreateResult> {
     // Fail-fast on the client. Mirror of the server's body schema —
     // catches the bug at the call site rather than after a 400 round trip.
-    const parsed = CreateTradeBodySchema.safeParse(body);
-    if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => ({
-        path: i.path.join('.'),
-        message: i.message,
-        code: i.code,
-      }));
-      const lead = issues[0];
-      const summary = lead ? `${lead.path || '(root)'}: ${lead.message}` : 'invalid trade body';
-      throw new KashValidationError(`trades.create: ${summary}`, {
-        code: 'VALIDATION_FAILED',
-        issues,
+    parseRequestBody(CreateTradeBodySchema, body, 'trades.create');
+    const { idempotencyKey: callerKey, ...rest } = opts;
+    // One clientRequestId and one Idempotency-Key per call, resolved here,
+    // before the transport's retry loop, so every attempt of this call sends
+    // the same pair and distinct calls never share one. The caller's values
+    // always win.
+    //
+    // The key alone does not stop a second trade: the server holds a key's
+    // claim for 60 s, fails open when it cannot take one, and releases it on
+    // any non-2xx (the 503 "trade recorded, event pipeline unavailable"
+    // included), after which the same key runs the handler again. The
+    // clientRequestId is checked against a unique `(user_id,
+    // client_request_id)` in the database instead, where `user_id` is the
+    // account the trade acts for, so a repeat of this call returns the
+    // trade it already recorded (200, `idempotent: true`) at any age.
+    //
+    // No randomness source: both stay unset, and the transport sends this
+    // unkeyed POST once, without retries (`autoIdempotencyKey`).
+    const generatedId = body.clientRequestId === undefined ? autoIdempotencyKey() : undefined;
+    const sent: CreateTradeBody =
+      generatedId === undefined ? body : { ...body, clientRequestId: generatedId };
+    const idempotencyKey = callerKey ?? autoIdempotencyKey();
+    const send = () =>
+      this.http.request({
+        path: '/trades',
+        method: 'POST',
+        schema: CreateTradeResponseSchema,
+        body: sent,
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        ...accountOverrides(rest),
       });
+    const usedId = sent.clientRequestId;
+    let response: Awaited<ReturnType<typeof send>>;
+    try {
+      response = await this.sendResolvingRace(send, generatedId !== undefined);
+      // A held high-value trade answered without its token: the API's replay
+      // of a 202 under the same Idempotency-Key, which never stores the token
+      // (this call's retry after its first 202 was lost). Ask once more under
+      // a FRESH key with the same clientRequestId: the database dedupes on
+      // the id, so nothing is placed twice, and the API answers the repeat
+      // with a new token for the key that placed the trade.
+      const heldWithoutToken =
+        response.trade.status === 'pending_confirmation' && !('confirmation' in response);
+      const freshKey = heldWithoutToken && usedId !== undefined ? autoIdempotencyKey() : undefined;
+      if (freshKey !== undefined) {
+        response = await this.http.request({
+          path: '/trades',
+          method: 'POST',
+          schema: CreateTradeResponseSchema,
+          body: sent,
+          idempotencyKey: freshKey,
+          ...accountOverrides(rest),
+        });
+      }
+    } catch (err) {
+      // Every error carries the id this call sent, so the caller can repeat
+      // the call with it (the generated one is otherwise unknowable).
+      if (KashError.isKashError(err)) err.clientRequestId = usedId;
+      throw err;
     }
-    const { idempotencyKey, ...rest } = opts;
-    const response = await this.http.request({
-      path: '/trades',
-      method: 'POST',
-      schema: CreateTradeResponseSchema,
-      body,
-      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
-      ...rest,
-    });
     // Flatten the envelope. `idempotent` always rides on `_meta`;
     // `confirmation` is only present in the 202 (high-value) shape.
     const result: TradeCreateResult = {
@@ -146,31 +212,55 @@ export class TradesClient {
   }
 
   /**
+   * Send, and on `CLIENT_REQUEST_ID_CONFLICT` for an id the SDK generated,
+   * send the identical request once more. That conflict means "this id
+   * already names a trade with a different body", but a generated id exists
+   * only in this call, so the body cannot differ: a concurrent attempt of
+   * this same call recorded the trade (the server answers the losing insert
+   * this way when its key claim failed open). The repeat returns that trade
+   * through the server's replay.
+   */
+  private async sendResolvingRace<T>(send: () => Promise<T>, generated: boolean): Promise<T> {
+    try {
+      return await send();
+    } catch (err) {
+      if (
+        !generated ||
+        !(err instanceof KashConflictError) ||
+        err.code !== 'CLIENT_REQUEST_ID_CONFLICT'
+      ) {
+        throw err;
+      }
+      return await send();
+    }
+  }
+
+  /**
    * Confirm a high-value trade by submitting the one-time token from
    * `trade.confirmation.token` returned by {@link create}.
    */
   async confirm(
     id: string,
     body: { token: string },
-    opts: RequestOverrides = {}
+    opts: AccountRequestOverrides = {}
   ): Promise<TradeResource> {
     const result = await this.http.request({
       path: `/trades/${encodeURIComponent(id)}/confirm`,
       method: 'POST',
       schema: ConfirmTradeResponseSchema,
       body,
-      ...opts,
+      ...accountOverrides(opts),
     });
     return result.trade;
   }
 
   /** Fetch a single trade by id. */
-  async get(id: string, opts: RequestOverrides = {}): Promise<TradeResource> {
+  async get(id: string, opts: AccountRequestOverrides = {}): Promise<TradeResource> {
     const result = await this.http.request({
       path: `/trades/${encodeURIComponent(id)}`,
       method: 'GET',
       schema: GetTradeResponseSchema,
-      ...opts,
+      ...accountOverrides(opts),
     });
     return result.trade;
   }
@@ -182,7 +272,7 @@ export class TradesClient {
    */
   async list(
     params: ListTradesParams = {},
-    opts: RequestOverrides = {}
+    opts: AccountRequestOverrides = {}
   ): Promise<Page<TradeResource>> {
     const limit = params.limit ?? 20;
     const fetchPage = async (
@@ -201,7 +291,7 @@ export class TradesClient {
           status: params.status,
           marketId: params.marketId,
         },
-        ...opts,
+        ...accountOverrides(opts),
       });
       return result;
     };
@@ -213,18 +303,28 @@ export class TradesClient {
    * `failed`, or `rejected`). Refuses to poll a trade that is still
    * `pending_confirmation` — the consumer must call {@link confirm}
    * first.
+   *
+   * That refusal is a {@link KashConflictError} with code
+   * `TRADE_NOT_AWAITING_CONFIRMATION` (raised by the SDK, `statusCode`
+   * 409). The name reads backwards here: the trade IS awaiting
+   * confirmation, which is why it cannot be waited on. The code is kept as
+   * published in 0.3.x so existing handlers keep matching; branch on it as
+   * "confirm this trade first".
    */
   async waitForCompletion(id: string, opts: WaitForCompletionOptions = {}): Promise<TradeResource> {
     // Forward the caller's signal to every inner GET so an abort
     // during an in-flight poll cancels the request itself, not just
     // the polling loop's next iteration.
-    const inner: RequestOverrides = {
+    const inner: AccountRequestOverrides = {
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+      ...(opts.account === undefined ? {} : { account: opts.account }),
     };
     const initial = await this.get(id, inner);
     if (initial.status === 'pending_confirmation') {
       throw new KashConflictError(
-        'Trade is awaiting high-value confirmation; call trades.confirm(id, { token }) first.',
+        `trades.waitForCompletion: trade ${id} is pending_confirmation and will not progress ` +
+          'until it is confirmed. Call trades.confirm(id, { token }) with the token from ' +
+          'trades.create, then wait.',
         { code: 'TRADE_NOT_AWAITING_CONFIRMATION', statusCode: 409 }
       );
     }

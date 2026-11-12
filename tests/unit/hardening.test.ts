@@ -25,7 +25,7 @@ import { buildPage } from '../../src/internal/pagination.js';
 
 import { META } from './_test-utils.js';
 
-import type { Pagination } from '../../src/schemas/common.js';
+import type { Pagination } from '../../src/schemas/envelope.js';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {

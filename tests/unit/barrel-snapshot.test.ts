@@ -26,6 +26,9 @@
 import { describe, expect, it } from 'vitest';
 
 import * as Sdk from '../../src/index.js';
+import * as SdkPartner from '../../src/partner.js';
+import * as SdkSchemas from '../../src/schemas/index.js';
+import * as SdkWebhooks from '../../src/webhooks.js';
 
 /**
  * Source of truth for the exported public surface of `@kashdao/sdk`.
@@ -36,21 +39,7 @@ import * as Sdk from '../../src/index.js';
 const EXPECTED_VALUE_EXPORTS = [
   'API_KEY_SHAPE',
   'AccountClient',
-  'AccountUsageResponseSchema',
-  'AccountUsageSchema',
-  'AmbassadorTokenSchema',
-  'ClientRequestIdSchema',
-  'ConfirmTradeBodySchema',
-  'ConfirmTradeResponseSchema',
-  'CreateRedemptionBodySchema',
-  'CreateRedemptionResponseSchema',
-  'CreateTradeAcceptedResponseSchema',
-  'CreateTradeBodySchema',
-  'CreateTradeCreatedResponseSchema',
-  'CreateTradeResponseSchema',
-  'GetMarketResponseSchema',
-  'GetTraceResponseSchema',
-  'GetTradeResponseSchema',
+  'KASH_ERROR_CODE',
   'KashAbortedError',
   'KashAuthenticationError',
   'KashAuthorizationError',
@@ -66,63 +55,21 @@ const EXPECTED_VALUE_EXPORTS = [
   'KashTimeoutError',
   'KashValidationError',
   'KashWebhookSignatureError',
-  'ListMarketsResponseSchema',
-  'ListPredictionsResponseSchema',
-  'ListTradesResponseSchema',
-  'ListWebhookEventsResponseSchema',
-  'MarketNotTradeableReasonSchema',
-  'MarketOutcomeSchema',
-  'MarketResolutionStateSchema',
-  'MarketResourceSchema',
-  'MarketStatusSchema',
   'MarketsClient',
-  'MetaSchema',
   'PRODUCTION_BASE_URL',
   'Page',
-  'PaginationSchema',
   'PortfolioClient',
-  'PortfolioSummaryResponseSchema',
-  'PortfolioSummarySchema',
-  'PositionResourceSchema',
-  'PositionsResponseSchema',
-  'PredictionResourceSchema',
-  'ProblemDetailsSchema',
-  'QuoteActionSchema',
-  'QuoteBuyDetailSchema',
-  'QuoteDetailSchema',
-  'QuoteMarketSummarySchema',
-  'QuoteResponseSchema',
-  'QuoteSellDetailSchema',
   'QuotesClient',
-  'RedeliverWebhookEventSchema',
-  'RedeliverWebhookResponseSchema',
-  'RedemptionKindSchema',
-  'RedemptionResourceSchema',
   'RedemptionsClient',
-  'RotateWebhookSecretResponseSchema',
   'SDK_API_VERSION',
   'SDK_VERSION',
   'SOLANA_CLUSTERS',
   'STAGING_BASE_URL',
   'TERMINAL_TRADE_STATUSES',
-  'TraceEventDataSchema',
-  'TraceEventSchema',
-  'TraceResourceSchema',
-  'TraceRetentionSchema',
   'TracesClient',
-  'TradeCompletedPayloadSchema',
-  'TradeConfirmationRequiredPayloadSchema',
-  'TradeFailedPayloadSchema',
-  'TradeMetadataSchema',
-  'TradeResourceSchema',
-  'TradeSideSchema',
-  'TradeStatusSchema',
   'TradesClient',
   'USER_AGENT',
-  'UsdcAmountSchema',
   'WATCH_POSITIONS_DEFAULTS',
-  'WebhookEventResourceSchema',
-  'WebhookEventSchema',
   'WebhooksClient',
   'classifyHttpError',
   'formatChainRef',
@@ -133,6 +80,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'isPendingTrade',
   'isRejectedTrade',
   'isTerminalTrade',
+  'isUnknownWebhookEvent',
   'parseChainRef',
   'tryParseChainRef',
 ] as const;
@@ -156,5 +104,183 @@ describe('public barrel surface', () => {
   it('exports are alphabetised in the snapshot list (so diffs read cleanly)', () => {
     const sorted = [...EXPECTED_VALUE_EXPORTS].sort();
     expect(EXPECTED_VALUE_EXPORTS).toEqual(sorted);
+  });
+});
+
+/**
+ * `@kashdao/sdk/webhooks`: the partner payload schemas and `trade.rejected`'s.
+ * Same rules as the list above.
+ */
+const EXPECTED_WEBHOOKS_VALUE_EXPORTS = [
+  'AccountActivePayloadSchema',
+  'AccountDestinationChangedPayloadSchema',
+  'AccountProvisioningFailedPayloadSchema',
+  'AccountReleasedPayloadSchema',
+  'PartnerAccountFailureReasonSchema',
+  'PartnerDestinationNetworkSchema',
+  'PartnerDestinationSchema',
+  'PayoutCompletedPayloadSchema',
+  'TradeRejectedPayloadSchema',
+  'WithdrawalCompletedPayloadSchema',
+  'WithdrawalFailedPayloadSchema',
+  'WithdrawalFailedStatusSchema',
+  'WithdrawalFailureCodeSchema',
+  'WithdrawalSubmittedPayloadSchema',
+];
+
+describe('webhooks subpath surface', () => {
+  it('exports exactly the expected set of value names', () => {
+    expect(Object.keys(SdkWebhooks).sort()).toEqual([...EXPECTED_WEBHOOKS_VALUE_EXPORTS].sort());
+  });
+
+  it('every expected export resolves to a defined value at runtime', () => {
+    for (const name of EXPECTED_WEBHOOKS_VALUE_EXPORTS) {
+      expect((SdkWebhooks as unknown as Record<string, unknown>)[name]).toBeDefined();
+    }
+  });
+
+  it('none of them is also served from the root entry', () => {
+    const root = new Set(Object.keys(Sdk));
+    expect(EXPECTED_WEBHOOKS_VALUE_EXPORTS.filter((name) => root.has(name))).toEqual([]);
+  });
+
+  it('each is the same object `@kashdao/sdk/schemas` exports', () => {
+    for (const name of EXPECTED_WEBHOOKS_VALUE_EXPORTS) {
+      expect((SdkWebhooks as Record<string, unknown>)[name]).toBe(
+        (SdkSchemas as Record<string, unknown>)[name]
+      );
+    }
+  });
+
+  it('the snapshot list is alphabetised', () => {
+    expect([...EXPECTED_WEBHOOKS_VALUE_EXPORTS]).toEqual(
+      [...EXPECTED_WEBHOOKS_VALUE_EXPORTS].sort()
+    );
+  });
+});
+
+/**
+ * `@kashdao/sdk/schemas`: every Zod schema, and the only entry the root's
+ * schemas are served from (0.4.0 moved them, keeping the root within the
+ * public-surface cap).
+ */
+const EXPECTED_SCHEMAS_VALUE_EXPORTS = [
+  'AccountActivePayloadSchema',
+  'AccountDestinationChangedPayloadSchema',
+  'AccountProvisioningFailedPayloadSchema',
+  'AccountReleasedPayloadSchema',
+  'AccountUsageResponseSchema',
+  'AccountUsageSchema',
+  'AmbassadorTokenSchema',
+  'BalanceResourceSchema',
+  'ClientRequestIdSchema',
+  'ConfirmTradeBodySchema',
+  'ConfirmTradeResponseSchema',
+  'CreatePartnerAccountBodySchema',
+  'CreatePartnerWithdrawalBodySchema',
+  'CreatePartnerWithdrawalResponseSchema',
+  'CreateRedemptionBodySchema',
+  'CreateRedemptionResponseSchema',
+  'CreateTradeAcceptedResponseSchema',
+  'CreateTradeBodySchema',
+  'CreateTradeCreatedResponseSchema',
+  'CreateTradeResponseSchema',
+  'GetBalanceResponseSchema',
+  'GetMarketResponseSchema',
+  'GetPartnerAccountResponseSchema',
+  'GetPartnerWithdrawalResponseSchema',
+  'GetTraceResponseSchema',
+  'GetTradeResponseSchema',
+  'ListMarketsResponseSchema',
+  'ListPartnerAccountsResponseSchema',
+  'ListPartnerWithdrawalsResponseSchema',
+  'ListPredictionsResponseSchema',
+  'ListTradesResponseSchema',
+  'ListWebhookEventsResponseSchema',
+  'MarketNotTradeableReasonSchema',
+  'MarketOutcomeSchema',
+  'MarketResolutionStateSchema',
+  'MarketResourceSchema',
+  'MarketStatusSchema',
+  'MetaSchema',
+  'PaginationSchema',
+  'PartnerAccountFailureReasonSchema',
+  'PartnerAccountResourceSchema',
+  'PartnerAccountStatusSchema',
+  'PartnerDestinationInputSchema',
+  'PartnerDestinationNetworkSchema',
+  'PartnerDestinationSchema',
+  'PartnerExternalIdSchema',
+  'PartnerWithdrawalQuoteResponseSchema',
+  'PartnerWithdrawalQuoteSchema',
+  'PartnerWithdrawalResourceSchema',
+  'PartnerWithdrawalStatusSchema',
+  'PayoutCompletedPayloadSchema',
+  'PortfolioSummaryResponseSchema',
+  'PortfolioSummarySchema',
+  'PositionResourceSchema',
+  'PositionsResponseSchema',
+  'PredictionResourceSchema',
+  'ProblemDetailsSchema',
+  'QuoteActionSchema',
+  'QuoteBuyDetailSchema',
+  'QuoteDetailSchema',
+  'QuoteMarketSummarySchema',
+  'QuoteResponseSchema',
+  'QuoteSellDetailSchema',
+  'RedeliverWebhookEventSchema',
+  'RedeliverWebhookResponseSchema',
+  'RedemptionKindSchema',
+  'RedemptionResourceSchema',
+  'RotateWebhookSecretResponseSchema',
+  'TraceEventDataSchema',
+  'TraceEventSchema',
+  'TraceResourceSchema',
+  'TraceRetentionSchema',
+  'TradeCompletedPayloadSchema',
+  'TradeConfirmationRequiredPayloadSchema',
+  'TradeFailedPayloadSchema',
+  'TradeMetadataSchema',
+  'TradeRejectedPayloadSchema',
+  'TradeResourceSchema',
+  'TradeSideSchema',
+  'TradeStatusSchema',
+  'UpdatePartnerAccountBodySchema',
+  'UsdcAmountSchema',
+  'UsdcAtomicSchema',
+  'WebhookEventResourceSchema',
+  'WebhookEventSchema',
+  'WithdrawalAmountAtomicSchema',
+  'WithdrawalCompletedPayloadSchema',
+  'WithdrawalFailedPayloadSchema',
+  'WithdrawalFailedStatusSchema',
+  'WithdrawalFailureCodeSchema',
+  'WithdrawalSubmittedPayloadSchema',
+  'WritePartnerAccountResponseSchema',
+];
+
+describe('schemas subpath surface', () => {
+  it('exports exactly the expected set of value names, every one a schema', () => {
+    expect(Object.keys(SdkSchemas).sort()).toEqual([...EXPECTED_SCHEMAS_VALUE_EXPORTS].sort());
+    for (const [name, value] of Object.entries(SdkSchemas)) {
+      expect(typeof (value as { safeParse?: unknown }).safeParse, name).toBe('function');
+    }
+  });
+
+  it('the root entry exports no schema', () => {
+    const rootSchemas = Object.entries(Sdk).filter(
+      ([, value]) => typeof (value as { safeParse?: unknown } | null)?.safeParse === 'function'
+    );
+    expect(rootSchemas.map(([name]) => name)).toEqual([]);
+  });
+
+  it('the snapshot list is alphabetised', () => {
+    expect([...EXPECTED_SCHEMAS_VALUE_EXPORTS]).toEqual([...EXPECTED_SCHEMAS_VALUE_EXPORTS].sort());
+  });
+});
+
+describe('partner subpath surface', () => {
+  it('is types only: it adds no runtime value, so no class is bundled twice', () => {
+    expect(Object.keys(SdkPartner)).toEqual([]);
   });
 });

@@ -26,6 +26,8 @@
  * intentional here despite the usual "Symbol() is unique" guidance:
  * the whole point is to recognise sibling instances across realms.
  */
+import type { KashErrorCode } from './error-codes.js';
+
 const KASH_ERROR_BRAND: unique symbol = Symbol.for('@kashdao/sdk:KashError');
 
 /**
@@ -40,9 +42,14 @@ export type KashErrorInit = {
    * the SDK-internal sentinels for transport-layer failures
    * (`SDK_TIMEOUT`, `SDK_NETWORK`, `SDK_VALIDATION`).
    */
-  readonly code: string;
+  readonly code: KashErrorCode;
   /** HTTP status, when the error was triggered by an HTTP response. */
   readonly statusCode?: number | undefined;
+  /**
+   * Parsed `Retry-After` (seconds; the HTTP-date form is converted), when the
+   * response carried one.
+   */
+  readonly retryAfterSeconds?: number | undefined;
   /** Server-side request id (`X-Request-ID` header or `_meta.requestId`). */
   readonly requestId?: string | undefined;
   /** Underlying error (network failure, parse error). */
@@ -121,9 +128,20 @@ export abstract class KashError extends Error {
    */
   readonly [KASH_ERROR_BRAND] = true as const;
 
-  readonly code: string;
+  /**
+   * Stable, machine-readable code. Compare it with {@link KASH_ERROR_CODE}
+   * members; see {@link KashErrorCode} for why it stays open.
+   */
+  readonly code: KashErrorCode;
   readonly statusCode: number | undefined;
   readonly requestId: string | undefined;
+  /**
+   * The server's `Retry-After`, in seconds, when the response sent one;
+   * `undefined` otherwise. Present on every class, so one read covers a
+   * rate limit (429), a hold (`WITHDRAWALS_HELD`, 409), an outage (503)
+   * and anything else that says when to come back.
+   */
+  readonly retryAfterSeconds: number | undefined;
   /**
    * Method/path/attempt — set by the HTTP layer at throw time.
    * Undefined for errors thrown before any request was attempted
@@ -178,6 +196,15 @@ export abstract class KashError extends Error {
    */
   extensions: Readonly<Record<string, unknown>> | undefined;
   /**
+   * The `clientRequestId` the failing `trades.create` call sent: yours, or
+   * the one the SDK generated when you gave none. Pass it back in the same
+   * body to repeat the call safely: the API returns the trade if it was
+   * recorded and places it if it was not. Set by `trades.create` on every
+   * error it throws once the request is prepared; `undefined` on every
+   * other method, and when the runtime had no randomness to generate one.
+   */
+  clientRequestId: string | undefined;
+  /**
    * Whether the error class represents a transient failure that the
    * caller may retry. Concrete subclasses set this; the base value
    * is `false` so opaque future codes default to non-retryable.
@@ -196,12 +223,14 @@ export abstract class KashError extends Error {
     this.code = init.code;
     this.statusCode = init.statusCode;
     this.requestId = init.requestId;
+    this.retryAfterSeconds = init.retryAfterSeconds;
     this.context = undefined;
     this.rateLimit = init.rateLimit;
     this.apiVersion = init.apiVersion;
     this.idempotentReplay = init.idempotentReplay;
     this.deprecation = init.deprecation;
     this.extensions = init.extensions;
+    this.clientRequestId = undefined;
     // Restore prototype chain after `super` (matters when consumers
     // transpile to ES5 or use `Object.setPrototypeOf` lints).
     Object.setPrototypeOf(this, new.target.prototype);
@@ -244,6 +273,7 @@ export abstract class KashError extends Error {
       code: this.code,
       statusCode: this.statusCode,
       requestId: this.requestId,
+      retryAfterSeconds: this.retryAfterSeconds,
       isRetryable: this.isRetryable,
       context: this.context,
       rateLimit: this.rateLimit,
@@ -251,6 +281,7 @@ export abstract class KashError extends Error {
       idempotentReplay: this.idempotentReplay,
       deprecation: this.deprecation,
       extensions: this.extensions,
+      clientRequestId: this.clientRequestId,
     };
   }
 }
@@ -302,6 +333,11 @@ export class KashNotFoundError extends KashError {
  * tradeable, smart account not provisioned, insufficient balance, etc.
  * The consumer must reconcile the conflict — auto-retry would usually
  * re-trigger the same conflict.
+ *
+ * Not retried by the SDK, but some conflicts end on their own and say
+ * when: `WITHDRAWALS_HELD` carries the seconds until the hold after a
+ * destination change ends in `Retry-After`, surfaced as
+ * `retryAfterSeconds`.
  */
 export class KashConflictError extends KashError {
   constructor(message: string, init: KashErrorInit) {
@@ -313,22 +349,14 @@ export class KashConflictError extends KashError {
 // 429 — rate limited
 // -----------------------------------------------------------------
 
-export type KashRateLimitErrorInit = KashErrorInit & {
-  /**
-   * Parsed `Retry-After` value (seconds). The HTTP layer parses
-   * either the integer-seconds form or the HTTP-date form before
-   * constructing the error; consumers see seconds either way.
-   */
-  readonly retryAfterSeconds?: number | undefined;
-};
+/** The init of {@link KashRateLimitError}: `retryAfterSeconds` now lives on every error's init. */
+export type KashRateLimitErrorInit = KashErrorInit;
 
 export class KashRateLimitError extends KashError {
   override readonly isRetryable = true;
-  readonly retryAfterSeconds: number | undefined;
 
   constructor(message: string, init: KashRateLimitErrorInit) {
     super(message, init);
-    this.retryAfterSeconds = init.retryAfterSeconds;
   }
 }
 
@@ -457,14 +485,9 @@ export class KashWebhookSignatureError extends KashError {
  */
 export class KashServerError extends KashError {
   override readonly isRetryable = true;
-  readonly retryAfterSeconds: number | undefined;
 
-  constructor(
-    message: string,
-    init: KashErrorInit & { readonly retryAfterSeconds?: number | undefined }
-  ) {
+  constructor(message: string, init: KashErrorInit) {
     super(message, init);
-    this.retryAfterSeconds = init.retryAfterSeconds;
   }
 }
 
@@ -478,14 +501,9 @@ export class KashServerError extends KashError {
  */
 export class KashMaintenanceError extends KashError {
   override readonly isRetryable = true;
-  readonly retryAfterSeconds: number | undefined;
 
-  constructor(
-    message: string,
-    init: KashErrorInit & { readonly retryAfterSeconds?: number | undefined }
-  ) {
+  constructor(message: string, init: KashErrorInit) {
     super(message, init);
-    this.retryAfterSeconds = init.retryAfterSeconds;
   }
 }
 
@@ -693,6 +711,7 @@ export function classifyHttpError(input: ClassifyHttpErrorInput): KashError {
     idempotentReplay,
     deprecation,
     extensions,
+    retryAfterSeconds: parseRetryAfterSeconds(retryAfter, nowMs),
   } as const;
 
   // 401 — authentication
@@ -719,10 +738,7 @@ export function classifyHttpError(input: ClassifyHttpErrorInput): KashError {
 
   // 429 — rate limited
   if (status === 429 || code === 'RATE_LIMIT_EXCEEDED') {
-    return new KashRateLimitError(detail, {
-      ...init,
-      retryAfterSeconds: parseRetryAfterSeconds(retryAfter, nowMs),
-    });
+    return new KashRateLimitError(detail, init);
   }
 
   // 503 — maintenance vs generic dependency unavailable.
@@ -733,19 +749,15 @@ export function classifyHttpError(input: ClassifyHttpErrorInput): KashError {
   // Generic 503s (proxy, dependency outage) → `KashServerError`. All
   // three carry the parsed Retry-After so the retry loop can respect it.
   if (status === 503) {
-    const retryAfterSeconds = parseRetryAfterSeconds(retryAfter, nowMs);
     if (code === 'API_TRADE_PROCESSING_HALTED' || code === 'ROUTE_DISABLED') {
-      return new KashMaintenanceError(detail, { ...init, retryAfterSeconds });
+      return new KashMaintenanceError(detail, init);
     }
-    return new KashServerError(detail, { ...init, retryAfterSeconds });
+    return new KashServerError(detail, init);
   }
 
   // 504 — gateway timeout (REQUEST_TIMEOUT in the catalog)
   if (status === 504 || code === 'REQUEST_TIMEOUT') {
-    return new KashServerError(detail, {
-      ...init,
-      retryAfterSeconds: parseRetryAfterSeconds(retryAfter, nowMs),
-    });
+    return new KashServerError(detail, init);
   }
 
   // 409 — conflicts. Idempotency, client-request-id, market state,
@@ -762,10 +774,7 @@ export function classifyHttpError(input: ClassifyHttpErrorInput): KashError {
 
   // Catch-all for 5xx — server fault, retryable.
   if (status >= 500) {
-    return new KashServerError(detail, {
-      ...init,
-      retryAfterSeconds: parseRetryAfterSeconds(retryAfter, nowMs),
-    });
+    return new KashServerError(detail, init);
   }
 
   // Anything else (rare 4xx not above): treat as validation since
