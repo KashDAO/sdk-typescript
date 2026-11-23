@@ -16,7 +16,7 @@
 
 import { KashConflictError, KashValidationError } from '../errors.js';
 import { buildPage, type Page } from '../internal/pagination.js';
-import { pollUntil } from '../internal/polling.js';
+import { pollTiming, pollUntil } from '../internal/polling.js';
 import { parseRequestBody } from '../internal/request-body.js';
 import { pageLimit, transportOverrides, validateUuid } from '../internal/request-options.js';
 import {
@@ -53,9 +53,9 @@ export type PartnerAccountWriteOptions = RequestOverrides & {
 
 /** Options for {@link PartnerAccountsClient.waitUntilActive}. */
 export type WaitUntilActiveOptions = {
-  /** Total time budget across all polls. Default 120 s. */
+  /** Total time budget across all polls. Default 120 s. A value that is not a finite number of 0 or more is refused with `KashValidationError`. */
   readonly timeoutMs?: number;
-  /** Delay between polls. Default 2 s. */
+  /** Delay between polls. Default 2 s; at least 1 ms and at most 2,147,483,647 ms (the longest delay a timer honours); anything else is refused with `KashValidationError`. */
   readonly pollIntervalMs?: number;
   /** Invoked with each fetched account, for status logs. */
   readonly onStatus?: (account: PartnerAccountResource) => void;
@@ -163,6 +163,10 @@ export class PartnerAccountsClient {
     opts: WaitUntilActiveOptions = {}
   ): Promise<PartnerAccountResource> {
     validateUuid(accountId, 'accountId');
+    const timing = pollTiming('partnerAccounts.waitUntilActive', {
+      timeoutMs: opts.timeoutMs ?? 120_000,
+      pollIntervalMs: opts.pollIntervalMs ?? 2_000,
+    });
     const inner: RequestOverrides = opts.signal === undefined ? {} : { signal: opts.signal };
     return pollUntil(
       async () => {
@@ -178,8 +182,7 @@ export class PartnerAccountsClient {
       },
       (account) => account.status === 'active',
       {
-        timeoutMs: opts.timeoutMs ?? 120_000,
-        pollIntervalMs: opts.pollIntervalMs ?? 2_000,
+        timing,
         ...(opts.onStatus === undefined ? {} : { onStatus: opts.onStatus }),
         ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       }

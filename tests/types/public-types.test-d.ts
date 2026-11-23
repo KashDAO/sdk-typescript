@@ -54,6 +54,17 @@ import {
   isRejectedTrade,
   isTerminalTrade,
 } from '../../src/index.js';
+import {
+  type MarketConversationMessageResult,
+  type MarketConversationReply,
+  type MarketConversationStartResult,
+  type MarketConversationState,
+  type MarketConversationStatus,
+  type MarketConversationTurn,
+  type TranscriptPage,
+  type WaitForReplyOptions,
+  isMarketContentRefusal,
+} from '../../src/market-conversations.js';
 
 describe('KashClient public surface', () => {
   it('constructs from a config object only — no positional args', () => {
@@ -75,6 +86,46 @@ describe('KashClient public surface', () => {
     expectTypeOf<ClientShape>().toHaveProperty('balance');
     expectTypeOf<ClientShape>().toHaveProperty('partnerAccounts');
     expectTypeOf<ClientShape['partnerAccounts']>().toHaveProperty('withdrawals');
+    expectTypeOf<ClientShape>().toHaveProperty('marketConversations');
+  });
+});
+
+describe('market conversation types (preview)', () => {
+  it('the write results nest the resource beside the replay flag', () => {
+    expectTypeOf<MarketConversationStartResult['idempotentReplay']>().toEqualTypeOf<boolean>();
+    expectTypeOf<MarketConversationStartResult['conversation']['id']>().toEqualTypeOf<string>();
+    expectTypeOf<
+      MarketConversationMessageResult['message']['conversationId']
+    >().toEqualTypeOf<string>();
+  });
+
+  it('the status stays open with its known members', () => {
+    expectTypeOf<'idle'>().toMatchTypeOf<MarketConversationStatus>();
+    expectTypeOf<'a_status_added_later'>().toMatchTypeOf<MarketConversationStatus>();
+    expectTypeOf<MarketConversationState['latestMessage']>().toBeNullable();
+  });
+
+  it('messages returns a TranscriptPage whose after is nullable', async () => {
+    type Messages = ReturnType<KashClient['marketConversations']['messages']>;
+    expectTypeOf<Awaited<Messages>>().toEqualTypeOf<TranscriptPage<MarketConversationTurn>>();
+    expectTypeOf<TranscriptPage<MarketConversationTurn>['after']>().toEqualTypeOf<string | null>();
+  });
+
+  it('waitForReply takes the sent message and reports a closed outcome', () => {
+    expectTypeOf<MarketConversationMessageResult['message']>().toMatchTypeOf<
+      WaitForReplyOptions['message']
+    >();
+    expectTypeOf<MarketConversationReply['outcome']>().toEqualTypeOf<
+      'replied' | 'failed' | 'superseded'
+    >();
+  });
+
+  it('isMarketContentRefusal narrows unknown to a KashValidationError with a string reason', () => {
+    const err: unknown = null;
+    if (isMarketContentRefusal(err)) {
+      expectTypeOf(err).toMatchTypeOf<KashValidationError>();
+      expectTypeOf(err.extensions.reason).toMatchTypeOf<string>();
+    }
   });
 });
 

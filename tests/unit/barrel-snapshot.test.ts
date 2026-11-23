@@ -25,7 +25,9 @@
 
 import { describe, expect, it } from 'vitest';
 
+import * as SdkClaimable from '../../src/claimable.js';
 import * as Sdk from '../../src/index.js';
+import * as SdkMarketConversations from '../../src/market-conversations.js';
 import * as SdkPartner from '../../src/partner.js';
 import * as SdkSchemas from '../../src/schemas/index.js';
 import * as SdkWebhooks from '../../src/webhooks.js';
@@ -108,7 +110,8 @@ describe('public barrel surface', () => {
 });
 
 /**
- * `@kashdao/sdk/webhooks`: the partner payload schemas and `trade.rejected`'s.
+ * `@kashdao/sdk/webhooks`: the partner payload schemas, `trade.rejected`'s and
+ * `position.claimable`'s.
  * Same rules as the list above.
  */
 const EXPECTED_WEBHOOKS_VALUE_EXPORTS = [
@@ -120,6 +123,7 @@ const EXPECTED_WEBHOOKS_VALUE_EXPORTS = [
   'PartnerDestinationNetworkSchema',
   'PartnerDestinationSchema',
   'PayoutCompletedPayloadSchema',
+  'PositionClaimablePayloadSchema',
   'TradeRejectedPayloadSchema',
   'WithdrawalCompletedPayloadSchema',
   'WithdrawalFailedPayloadSchema',
@@ -144,10 +148,11 @@ describe('webhooks subpath surface', () => {
     expect(EXPECTED_WEBHOOKS_VALUE_EXPORTS.filter((name) => root.has(name))).toEqual([]);
   });
 
-  it('each is the same object `@kashdao/sdk/schemas` exports', () => {
+  it('each is the same object `@kashdao/sdk/schemas` or `@kashdao/sdk/claimable` exports', () => {
     for (const name of EXPECTED_WEBHOOKS_VALUE_EXPORTS) {
+      const source = name in SdkClaimable ? SdkClaimable : SdkSchemas;
       expect((SdkWebhooks as Record<string, unknown>)[name]).toBe(
-        (SdkSchemas as Record<string, unknown>)[name]
+        (source as Record<string, unknown>)[name]
       );
     }
   });
@@ -160,9 +165,10 @@ describe('webhooks subpath surface', () => {
 });
 
 /**
- * `@kashdao/sdk/schemas`: every Zod schema, and the only entry the root's
- * schemas are served from (0.4.0 moved them, keeping the root within the
- * public-surface cap).
+ * `@kashdao/sdk/schemas`: every Zod schema but claiming's and market
+ * conversations', and the only entry
+ * the root's schemas are served from (0.4.0 moved them, keeping the root
+ * within the public-surface cap).
  */
 const EXPECTED_SCHEMAS_VALUE_EXPORTS = [
   'AccountActivePayloadSchema',
@@ -282,5 +288,89 @@ describe('schemas subpath surface', () => {
 describe('partner subpath surface', () => {
   it('is types only: it adds no runtime value, so no class is bundled twice', () => {
     expect(Object.keys(SdkPartner)).toEqual([]);
+  });
+});
+
+/**
+ * `@kashdao/sdk/claimable`: the schemas of claiming (its types are not
+ * runtime values). Served here, not from `@kashdao/sdk/schemas` or the root,
+ * whose surfaces may not grow.
+ */
+const EXPECTED_CLAIMABLE_VALUE_EXPORTS = [
+  'ClaimablePositionResourceSchema',
+  'ClaimablePositionsResponseSchema',
+  'PositionClaimablePayloadSchema',
+];
+
+describe('claimable subpath surface', () => {
+  it('exports exactly the expected set of value names, every one a schema', () => {
+    expect(Object.keys(SdkClaimable).sort()).toEqual([...EXPECTED_CLAIMABLE_VALUE_EXPORTS].sort());
+    for (const [name, value] of Object.entries(SdkClaimable)) {
+      expect(typeof (value as { safeParse?: unknown }).safeParse, name).toBe('function');
+    }
+  });
+
+  it('none of them is also served from the root or the schemas entry', () => {
+    const elsewhere = new Set([...Object.keys(Sdk), ...Object.keys(SdkSchemas)]);
+    expect(EXPECTED_CLAIMABLE_VALUE_EXPORTS.filter((name) => elsewhere.has(name))).toEqual([]);
+  });
+
+  it('the snapshot list is alphabetised', () => {
+    expect([...EXPECTED_CLAIMABLE_VALUE_EXPORTS]).toEqual(
+      [...EXPECTED_CLAIMABLE_VALUE_EXPORTS].sort()
+    );
+  });
+});
+
+/**
+ * `@kashdao/sdk/market-conversations`: the schemas of market conversations and
+ * the content-refusal guard (`MarketConversationsClient`, `TranscriptPage` and
+ * the rest are types only). Served here, not from `@kashdao/sdk/schemas` or
+ * the root, whose surfaces may not grow.
+ */
+const EXPECTED_MARKET_CONVERSATIONS_VALUE_EXPORTS = [
+  'GetMarketConversationResponseSchema',
+  'ListMarketConversationMessagesResponseSchema',
+  'ListMarketConversationsResponseSchema',
+  'MarketContentRefusalReasonSchema',
+  'MarketConversationMessageResourceSchema',
+  'MarketConversationMessageStatusSchema',
+  'MarketConversationResourceSchema',
+  'MarketConversationRoleSchema',
+  'MarketConversationStateSchema',
+  'MarketConversationStatusSchema',
+  'MarketConversationTurnSchema',
+  'SendMarketConversationMessageBodySchema',
+  'SendMarketConversationMessageResponseSchema',
+  'StartMarketConversationResponseSchema',
+  'TranscriptPaginationSchema',
+  'isMarketContentRefusal',
+];
+
+describe('market-conversations subpath surface', () => {
+  it('exports exactly the expected set of value names: the guard, and schemas', () => {
+    expect(Object.keys(SdkMarketConversations).sort()).toEqual(
+      [...EXPECTED_MARKET_CONVERSATIONS_VALUE_EXPORTS].sort()
+    );
+    for (const [name, value] of Object.entries(SdkMarketConversations)) {
+      if (name === 'isMarketContentRefusal') {
+        expect(typeof value, name).toBe('function');
+        continue;
+      }
+      expect(typeof (value as { safeParse?: unknown }).safeParse, name).toBe('function');
+    }
+  });
+
+  it('none of them is also served from the root or the schemas entry', () => {
+    const elsewhere = new Set([...Object.keys(Sdk), ...Object.keys(SdkSchemas)]);
+    expect(
+      EXPECTED_MARKET_CONVERSATIONS_VALUE_EXPORTS.filter((name) => elsewhere.has(name))
+    ).toEqual([]);
+  });
+
+  it('the snapshot list is alphabetised', () => {
+    expect([...EXPECTED_MARKET_CONVERSATIONS_VALUE_EXPORTS]).toEqual(
+      [...EXPECTED_MARKET_CONVERSATIONS_VALUE_EXPORTS].sort()
+    );
   });
 });

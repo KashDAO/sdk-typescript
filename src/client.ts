@@ -24,6 +24,7 @@ import { z } from 'zod';
 
 import { AccountClient } from './clients/account.js';
 import { BalanceClient } from './clients/balance.js';
+import { MarketConversationsClient } from './clients/market-conversations.js';
 import { MarketsClient } from './clients/markets.js';
 import { PartnerAccountsClient } from './clients/partner-accounts.js';
 import { PortfolioClient } from './clients/portfolio.js';
@@ -76,6 +77,11 @@ export class KashClient {
   readonly balance: BalanceClient;
   /** Partner keys only: the accounts you hold for your users, and their withdrawals. */
   readonly partnerAccounts: PartnerAccountsClient;
+  /**
+   * Preview: the market creation API's conversations (`markets:write`).
+   * Answers `503 ROUTE_DISABLED` until the market creation API launches.
+   */
+  readonly marketConversations: MarketConversationsClient;
 
   /**
    * The validated, normalised config — exposed read-only for
@@ -108,6 +114,7 @@ export class KashClient {
     this.account = new AccountClient(this.http);
     this.balance = new BalanceClient(this.http);
     this.partnerAccounts = new PartnerAccountsClient(this.http);
+    this.marketConversations = new MarketConversationsClient(this.http);
   }
 
   /**

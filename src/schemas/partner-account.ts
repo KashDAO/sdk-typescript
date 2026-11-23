@@ -40,7 +40,10 @@ const destinationNetworkInputSchema: z.ZodType<PartnerDestinationNetwork, string
 
 /**
  * A withdrawal destination as a request sends it. `network` is `'solana'`
- * (a base58 address) or `'arc'` (a `0x` address). The type stays open so a
+ * (a base58 address) or an EVM network, `'arc'`, `'base'`, `'ethereum'`,
+ * `'arbitrum'`, `'optimism'` or `'polygon'` (a `0x` address); an EVM network
+ * other than `'arc'` is accepted only while withdrawals to it are open
+ * (`422 WITHDRAWAL_NETWORK_DISABLED`). The type stays open so a
  * network Kash adds later can be sent without an SDK release; one Kash does
  * not support is refused by the API with `422 DESTINATION_NOT_SUPPORTED`,
  * and an address that is wrong for its network with `400 VALIDATION_FAILED`.

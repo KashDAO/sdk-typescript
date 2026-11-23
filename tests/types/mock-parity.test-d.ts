@@ -41,7 +41,8 @@ type Subclients =
   | 'account'
   | 'traces'
   | 'balance'
-  | 'partnerAccounts';
+  | 'partnerAccounts'
+  | 'marketConversations';
 
 describe('MockKashClient parameter parity with KashClient', () => {
   it('every shared method takes the same parameters', () => {

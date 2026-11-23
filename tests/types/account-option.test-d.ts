@@ -55,6 +55,27 @@ describe('account option: accepted where the route takes Kash-Account', () => {
     void kash.traces.get('c', { account });
   });
 
+  it('SDK-09: compiles on every market conversation method', () => {
+    void kash.marketConversations.start({ account, idempotencyKey: 'k' });
+    void kash.marketConversations.sendMessage(marketId, { content: 'hi' }, { account });
+    void kash.marketConversations.list({}, { account });
+    void kash.marketConversations.get(marketId, { account });
+    void kash.marketConversations.messages(marketId, {}, { account });
+    void kash.marketConversations.waitForReply(marketId, {
+      message: { id: marketId, conversationId: marketId, createdAt: '2026-11-21T09:00:00.000Z' },
+      account,
+    });
+  });
+
+  it('a market conversation body refuses an unknown key and a widened action at compile time', () => {
+    // @ts-expect-error -- the body type is closed
+    void kash.marketConversations.sendMessage(marketId, { content: 'hi', contnet: 'x' });
+    // @ts-expect-error -- declaredAction is the one literal the API takes
+    void kash.marketConversations.sendMessage(marketId, { content: 'hi', declaredAction: 'other' });
+    // @ts-expect-error -- waitForReply needs the message it waits for
+    void kash.marketConversations.waitForReply(marketId, {});
+  });
+
   it('AccountRequestOverrides extends RequestOverrides with an optional account', () => {
     expectTypeOf<AccountRequestOverrides>().toMatchTypeOf<RequestOverrides>();
     expectTypeOf<AccountRequestOverrides['account']>().toEqualTypeOf<string | undefined>();

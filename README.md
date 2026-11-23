@@ -39,6 +39,7 @@ Official TypeScript SDK for the [Kash](https://kash.bot) public API.
   - [Account](#account)
   - [Traces](#traces)
   - [Balance](#balance)
+  - [Market conversations (preview)](#market-conversations-preview)
 - [Partner integration](#partner-integration) — accounts for your users, acting for them, withdrawals
 - [Pagination](#pagination)
 - [Polling](#polling)
@@ -157,13 +158,15 @@ bun add @kashdao/sdk
 
 ### Entry points
 
-| Import from             | What it holds                                                                                                                            |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `@kashdao/sdk`          | `KashClient`, errors and error codes, guards, chain references, and the types of markets, trades, quotes, portfolio, traces and webhooks |
-| `@kashdao/sdk/partner`  | Types of the partner surface: accounts, balances, withdrawals and their results (the methods are on `KashClient`)                        |
-| `@kashdao/sdk/schemas`  | Every Zod schema, for validating data yourself; the client already validates each response with them                                     |
-| `@kashdao/sdk/webhooks` | Partner webhook payload types and schemas                                                                                                |
-| `@kashdao/sdk/testing`  | A fixture-driven mock client and a test webhook signer                                                                                   |
+| Import from                         | What it holds                                                                                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@kashdao/sdk`                      | `KashClient`, errors and error codes, guards, chain references, and the types of markets, trades, quotes, portfolio, traces and webhooks |
+| `@kashdao/sdk/partner`              | Types of the partner surface: accounts, balances, withdrawals and their results (the methods are on `KashClient`)                        |
+| `@kashdao/sdk/schemas`              | Every Zod schema but claiming's and market conversations', for validating data yourself; the client already validates each response      |
+| `@kashdao/sdk/webhooks`             | Partner webhook payload types and schemas                                                                                                |
+| `@kashdao/sdk/claimable`            | Types and schemas of claiming: `portfolio.claimable()`'s argument and result, and the `position.claimable` payload                       |
+| `@kashdao/sdk/market-conversations` | Types, schemas and the content-refusal guard of market conversations (preview); the methods are on `kash.marketConversations`            |
+| `@kashdao/sdk/testing`              | A fixture-driven mock client and a test webhook signer                                                                                   |
 
 Most integrations import only from `@kashdao/sdk`.
 
@@ -268,16 +271,17 @@ endpoint for each operation; if your key lacks the scope, the request
 returns `403 INSUFFICIENT_SCOPE` and the SDK throws
 `KashAuthorizationError`.
 
-| Scope              | Unlocks                                                                                                                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markets:read`     | `kash.markets.list()`, `kash.markets.get()`, `kash.markets.predictions()`. Granted by default on every tier.                                                                          |
-| `markets:quote`    | `kash.quotes.buy()`, `kash.quotes.sell()`. Split from `markets:read` because quotes are RPC-heavy and customers may want to throttle quote traffic independently. Granted by default. |
-| `trades:read`      | `kash.trades.list()`, `kash.trades.get()`, `kash.traces.get()`.                                                                                                                       |
-| `trades:write`     | `kash.trades.create()`, `kash.trades.confirm()`, `kash.trades.waitForCompletion()`.                                                                                                   |
-| `portfolio:read`   | `kash.portfolio.get()`, `kash.portfolio.positions()`, `kash.balance.get()`.                                                                                                           |
-| `webhooks:manage`  | `kash.webhooks.list()`, `kash.webhooks.redeliver()`, `kash.webhooks.rotateSecret()`.                                                                                                  |
-| `auth:manage`      | `kash.account.usage()` plus API key self-service in the app (issue / list / revoke own keys — those operations aren't exposed in the SDK yet).                                        |
-| `partner:accounts` | Partner keys only: every `kash.partnerAccounts` method, its `withdrawals` included. See [Partner integration](#partner-integration).                                                  |
+| Scope              | Unlocks                                                                                                                                                                                                                                                                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markets:read`     | `kash.markets.list()`, `kash.markets.get()`, `kash.markets.predictions()`. Granted by default on every tier.                                                                                                                                                                                                                                       |
+| `markets:quote`    | `kash.quotes.buy()`, `kash.quotes.sell()`. Split from `markets:read` because quotes are RPC-heavy and customers may want to throttle quote traffic independently. Granted by default.                                                                                                                                                              |
+| `trades:read`      | `kash.trades.list()`, `kash.trades.get()`, `kash.traces.get()`.                                                                                                                                                                                                                                                                                    |
+| `trades:write`     | `kash.trades.create()`, `kash.trades.confirm()`, `kash.trades.waitForCompletion()`.                                                                                                                                                                                                                                                                |
+| `portfolio:read`   | `kash.portfolio.get()`, `kash.portfolio.positions()`, `kash.portfolio.claimable()`, `kash.balance.get()`.                                                                                                                                                                                                                                          |
+| `webhooks:manage`  | `kash.webhooks.list()`, `kash.webhooks.redeliver()`, `kash.webhooks.rotateSecret()`.                                                                                                                                                                                                                                                               |
+| `auth:manage`      | `kash.account.usage()` plus API key self-service in the app (issue / list / revoke own keys — those operations aren't exposed in the SDK yet).                                                                                                                                                                                                     |
+| `markets:write`    | `kash.marketConversations.start()`, `kash.marketConversations.sendMessage()`, `kash.marketConversations.list()`, `kash.marketConversations.get()`, `kash.marketConversations.messages()`, `kash.marketConversations.waitForReply()`: the market creation API (preview). Never granted by default; available when the market creation API launches. |
+| `partner:accounts` | Partner keys only: every `kash.partnerAccounts` method, its `withdrawals` included. See [Partner integration](#partner-integration).                                                                                                                                                                                                               |
 
 > **`kash.healthCheck()` is the only fully public method** — no API
 > key required. Every other resource method authenticates via API key.
@@ -882,11 +886,34 @@ support. The error message (the server's `detail`) says which case applies.
 ```ts
 const summary = await kash.portfolio.get();
 const positions = await kash.portfolio.positions({ marketId });
+// What can be claimed now, with the chain's quote for each claim.
+const claimable = await kash.portfolio.claimable({ marketId });
 
 // Watching for changes: yields now, then again only when positions change.
 for await (const positions of kash.portfolio.watchPositions({ signal })) {
   rebalance(positions);
 }
+```
+
+`claimable()` lists every position the account can claim now with
+`redemptions.create`: a winning outcome of a resolved market (`kind:
+'resolved'`) or a holding in a cancelled market (`kind: 'cancelled'`).
+`quotedAmountAtomic` is the chain's quote in USDC atomic units, a minimum of
+what the claim pays before the network fee, so show it as "about"; it is
+`null` with `quoteStatus: 'unavailable'` when the quote could not be read,
+never `0`. `claimStatus: 'claim_failed'` means an earlier claim failed in a
+way a new claim cannot replace: send the user to support instead of offering
+a claim. `claimStatus: 'claims_paused'` means Kash has paused claiming, so
+`redemptions.create` would refuse every claim now: show the amount, offer no
+claim, and list again later; it takes precedence over the other two. When
+`redemptions.create` would refuse the caller whatever is claimed, `claimable()`
+throws the same `KashConflictError` first (`WALLET_DELEGATION_NOT_ENABLED`,
+`SMART_ACCOUNT_NOT_PROVISIONED` or `ACCOUNT_NOT_ACTIVE`). Call it when the `position.claimable` webhook arrives (see
+[Webhooks](#webhooks)) rather than polling. Its types and schemas come from
+the `claimable` subpath:
+
+```ts
+import type { ClaimablePositionResource, ListClaimableParams } from '@kashdao/sdk/claimable';
 ```
 
 Do not poll `positions()` in a tight loop. Use `watchPositions`, or, if your
@@ -992,6 +1019,101 @@ atomic units: `'25000000'` is 25 USDC. A balance the API cannot read
 throws `KashServerError` (`DEPENDENCY_UNAVAILABLE`); it is never reported
 as zero. A partner key passes `{ account }` (see below).
 
+### Market conversations (preview)
+
+> **Preview.** Every method answers `503 ROUTE_DISABLED`
+> (`KashMaintenanceError`) until the market creation API launches, and this
+> surface may change in a minor release before then.
+
+A market conversation is a chat with Kash's market creation assistant, which
+drafts a market from what the user writes. Start a conversation, send the
+user's messages, and read the assistant's replies from the transcript.
+Sending is asynchronous: `sendMessage` answers once the message is queued,
+and `waitForReply` polls until the reply is written.
+
+```ts
+const { conversation } = await kash.marketConversations.start({
+  idempotencyKey: `${jobId}:start`,
+});
+
+const { message } = await kash.marketConversations.sendMessage(
+  conversation.id,
+  { content: 'Will Calgary get more than 10 cm of snow on 1 December 2026?' },
+  { idempotencyKey: `${jobId}:message-1` }
+);
+
+const reply = await kash.marketConversations.waitForReply(conversation.id, {
+  message, // what sendMessage returned
+  after, // the position you kept from the last read; omit on the first message
+});
+// reply.outcome: 'replied' | 'failed' | 'superseded'
+// reply.turns:   the turns after `after`, one per turnNumber at its highest revision
+// reply.after:   keep it, and pass it next time
+// reply.state:   readyToPublish, marketRequestId, queuePosition, ...
+```
+
+Requires the `markets:write` scope on every method, reads included. A partner
+key names the user with `{ account }` on each call.
+
+- **The transcript.** `messages(conversationId, { after?, limit? })` returns a
+  `TranscriptPage`: `data`, `after`, `hasMore`, `getNextPage()`, and async
+  iteration over every turn. `after` is where the next read starts; it stays
+  set on the last page, so keep it to read only what is new. A read from the
+  start that finds nothing (before the first turn, or while the assistant is
+  writing one) answers an empty page with `after` null: read from the start
+  again next time. A turn the
+  assistant rewrites comes back after your position with a higher `revision`.
+  Use `page.pages()` to walk page by page and keep the last `after`.
+- **Waiting.** `waitForReply` resolves `replied` once the conversation is idle
+  and the reply is in the transcript, `failed` when the message could not be
+  delivered (send it again with a new key), and `superseded` when a message
+  sent after yours has become the latest. Pass it the `message` that
+  `sendMessage` returned; a message that is not in the conversation is
+  refused. It throws `KashTimeoutError`
+  (`SDK_POLL_TIMEOUT`) after `timeoutMs` (default 180 s; polls every 3 s by
+  default, each poll counting toward your rate limit); the reply may still
+  come, so read the transcript later from the `after` you hold. A reply saying
+  today's drafting budget is used up is a reply too.
+- **Idempotency.** The SDK keys both writes, so its own retries never start a
+  second conversation or send a message twice. Pass your own `idempotencyKey`
+  to make a retry of the whole call safe, after a crash or from another
+  process: the API returns the stored answer, a content refusal included. The
+  results (`{ conversation }` and `{ message }`) carry `idempotentReplay`,
+  read from the `Idempotent-Replay` header;
+  the body's `_meta.idempotent` is always `false` on these routes.
+- **Content refusal.** A message that breaks Kash's market content rules throws
+  `KashValidationError` with code `MARKET_CONTENT_REFUSED`.
+  `isMarketContentRefusal(err)`, from `@kashdao/sdk/market-conversations`, narrows `err.extensions.reason` to the rule,
+  and `err.message` explains it in words you can show the user. The same text
+  is refused again, so ask the user to rephrase.
+- **Limits.** Starts and messages share a rate limit of 20 a minute per user.
+  Daily limits throw `KashRateLimitError` with code
+  `MARKET_CREATION_DAILY_LIMIT_REACHED` and `retryAfterSeconds` until 00:00
+  UTC; the SDK does not wait that long for you.
+- **Ids.** Conversation and message ids are UUIDs, checked before sending.
+  The SDK sends conversation ids lower-case, as the API matches them. An
+  unknown conversation, or one that is not yours, throws `KashNotFoundError`
+  (`MARKET_CONVERSATION_NOT_FOUND`), the same for both.
+- **Time zone.** `timezone` is an IANA name such as `America/Edmonton`, used
+  to read relative dates. The SDK checks only its length; the API resolves it
+  and answers `400 VALIDATION_FAILED` for an unknown zone or a UTC offset.
+
+The argument and result types (`MarketConversationState`,
+`MarketConversationTurn`, `MarketConversationReply`, `TranscriptPage`, ...),
+their schemas and `isMarketContentRefusal` come from
+`@kashdao/sdk/market-conversations`:
+
+```ts
+import {
+  isMarketContentRefusal,
+  type MarketConversationReply,
+} from '@kashdao/sdk/market-conversations';
+```
+
+`MarketConversationsClient` and `TranscriptPage` are types there, not
+classes: the client builds both. See
+[`examples/09-market-conversation.ts`](./examples/09-market-conversation.ts).
+
 ## Partner integration
 
 A partner (an organisation with a partner API key and the
@@ -1023,7 +1145,8 @@ await kash.portfolio.positions({}, { account: accountId });
 
 `account` is accepted by `balance`, `trades` (every method,
 `waitForCompletion` included), `portfolio` (including `watchPositions`),
-`redemptions` and `traces`. Markets and quotes act for no account, and the
+`redemptions`, `traces` and `marketConversations` (every method,
+`waitForReply` included). Markets and quotes act for no account, and the
 `partnerAccounts` methods name the account in the path, so those methods do
 not take `account`: the API would refuse the header with
 `400 ACCOUNT_HEADER_NOT_ALLOWED`, and the types stop it compiling. For the
@@ -1205,7 +1328,7 @@ Compare `err.code` with `KASH_ERROR_CODE` rather than a string literal:
 | `ACCOUNT_NOT_ACTIVE`                | `KashConflictError`      | the account is provisioning, suspended or failed; `detail` says which                                                                                                                              |
 | `ACCOUNT_NOT_FOUND`                 | `KashNotFoundError`      | unknown, another partner's, or released                                                                                                                                                            |
 | `INSUFFICIENT_BALANCE`              | `KashConflictError`      | more than `availableAtomic` (to Arc, plus the network fee)                                                                                                                                         |
-| `WITHDRAWAL_BELOW_MINIMUM`          | `KashValidationError`    | under 1 USDC to Arc, or no more than the network fee                                                                                                                                               |
+| `WITHDRAWAL_BELOW_MINIMUM`          | `KashValidationError`    | under 2 USDC to Arc, or no more than the network fee                                                                                                                                               |
 | `WITHDRAWALS_HELD`                  | `KashConflictError`      | 24-hour hold after a destination change; see `retryAfterSeconds`                                                                                                                                   |
 | `DESTINATION_NOT_SUPPORTED`         | `KashValidationError`    | Kash cannot withdraw to that network here (422)                                                                                                                                                    |
 | `RELEASE_REQUIRES_EMPTY_ACCOUNT`    | `KashConflictError`      | withdraw everything and let work finish, then release                                                                                                                                              |
@@ -1245,7 +1368,9 @@ cursor bug).
 ## Polling
 
 `trades.waitForCompletion(id)` polls until the trade reaches a terminal
-status (`completed`, `failed`, or `rejected`).
+status (`completed`, `failed`, or `rejected`). For a market conversation,
+`marketConversations.waitForReply(id, { message })` waits for the
+assistant's reply (see [Market conversations](#market-conversations-preview)).
 
 ```ts
 const done = await kash.trades.waitForCompletion(tradeId, {
@@ -1622,9 +1747,8 @@ reuse the same id.
 
 ### Partner webhooks
 
-A partner key also receives the account, withdrawal and payout events of
-its organisation's accounts, and `constructEvent` parses them the same
-way. Each names the account by `accountId` (the value you pass as
+A partner key also receives the account and withdrawal events of its
+organisation's accounts, and `constructEvent` parses them the same way. Each names the account by `accountId` (the value you pass as
 `account`, sent as `Kash-Account`) and by your own `externalId`. Amounts
 are USDC atomic units (6 decimals) as strings.
 
@@ -1637,7 +1761,6 @@ are USDC atomic units (6 decimals) as strings.
 | `withdrawal.submitted`        | the withdrawal was accepted and queued for sending                        |
 | `withdrawal.completed`        | the USDC reached the destination                                          |
 | `withdrawal.failed`           | the withdrawal ended without delivering; see `data.errorCode`             |
-| `payout.completed`            | winnings from a resolved market were paid into the account                |
 
 ```ts
 const event = await kash.webhooks.constructEvent(rawBody, header, secret);
@@ -1658,6 +1781,54 @@ switch (event.type) {
     break;
 }
 ```
+
+### `payout.completed`
+
+Sent when winnings or a cancelled market's refund were paid into the user's
+wallet, after a claim or when Kash paid out unclaimed winnings.
+`data.amountAtomic` is what arrived, after any network fee. Like
+`position.claimable` it reaches any key: a partner key receives one per payout
+of a partner account, with both `accountId` and `externalId`; a user key
+receives one per payout of its own user, with neither.
+
+| `event.type`       | Sent when                                             |
+| ------------------ | ----------------------------------------------------- |
+| `payout.completed` | winnings or a refund were paid into the user's wallet |
+
+```ts
+if (event.type === 'payout.completed') {
+  // event.data.accountId is undefined on a user key's delivery.
+  await recordPayout(event.data.externalId ?? 'me', event.data.payoutId, event.data.amountAtomic);
+}
+```
+
+### `position.claimable`
+
+Sent once per market when a resolved market's winnings, or a cancelled
+market's refunds, open for claiming. Unlike the partner webhooks it reaches
+any key: a partner key receives one per partner account, with both
+`accountId` and `externalId`; a user key receives one for its own user, with
+neither. It lists the claimable `outcomes` and their `shares` but carries no
+amount, because the amount moves as other holders claim.
+
+| `event.type`         | Sent when                                                              |
+| -------------------- | ---------------------------------------------------------------------- |
+| `position.claimable` | winnings or refunds in a market are ready to claim; no amount included |
+
+```ts
+if (event.type === 'position.claimable') {
+  const account = event.data.accountId; // undefined on a user key's delivery
+  const items = await kash.portfolio.claimable(
+    { marketId: event.data.marketId },
+    account === undefined ? {} : { account }
+  );
+  await showClaimButton(event.data.externalId, items);
+}
+```
+
+Then claim with `kash.redemptions.create({ marketId, outcomeIndex })`;
+`payout.completed` reports what landed. `PositionClaimablePayload` and its
+schema are exported from `@kashdao/sdk/claimable` and `@kashdao/sdk/webhooks`.
 
 ### Event types the SDK does not know
 
@@ -2135,13 +2306,15 @@ Every release is gated by [`size-limit`](https://github.com/ai/size-limit),
 which measures each entry the way your bundler ships it — minified, then
 brotli-compressed:
 
-| Entry                   | Cap   |
-| ----------------------- | ----- |
-| `@kashdao/sdk`          | 24 KB |
-| `@kashdao/sdk/partner`  | 1 KB  |
-| `@kashdao/sdk/schemas`  | 5 KB  |
-| `@kashdao/sdk/testing`  | 8 KB  |
-| `@kashdao/sdk/webhooks` | 5 KB  |
+| Entry                               | Cap   |
+| ----------------------------------- | ----- |
+| `@kashdao/sdk`                      | 24 KB |
+| `@kashdao/sdk/partner`              | 1 KB  |
+| `@kashdao/sdk/schemas`              | 5 KB  |
+| `@kashdao/sdk/testing`              | 9 KB  |
+| `@kashdao/sdk/webhooks`             | 5 KB  |
+| `@kashdao/sdk/claimable`            | 2 KB  |
+| `@kashdao/sdk/market-conversations` | 2 KB  |
 
 Verify locally with `pnpm build && pnpm size`.
 

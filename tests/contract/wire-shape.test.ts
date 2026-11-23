@@ -34,6 +34,16 @@ import {
   PredictionResourceSchema,
 } from '../../src/schemas/market.js';
 import {
+  GetMarketConversationResponseSchema,
+  ListMarketConversationMessagesResponseSchema,
+  ListMarketConversationsResponseSchema,
+  MarketConversationStateSchema,
+  MarketConversationTurnSchema,
+  SendMarketConversationMessageBodySchema,
+  SendMarketConversationMessageResponseSchema,
+  StartMarketConversationResponseSchema,
+} from '../../src/schemas/market-conversation.js';
+import {
   PortfolioSummaryResponseSchema,
   PositionResourceSchema,
   PositionsResponseSchema,
@@ -546,6 +556,46 @@ export const FIXTURE_BALANCE = {
   pendingWithdrawalsAtomic: '2500000',
   availableAtomic: '22500000',
   observedAt: '2026-11-07T10:31:00.000Z',
+};
+
+export const FIXTURE_MARKET_CONVERSATION = {
+  id: '5b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e',
+  createdAt: '2026-11-21T09:00:00.000Z',
+};
+
+export const FIXTURE_MARKET_CONVERSATION_MESSAGE = {
+  id: '6c2e3d4f-5a6b-4c7d-9e8f-0a1b2c3d4e5f',
+  conversationId: FIXTURE_MARKET_CONVERSATION.id,
+  createdAt: '2026-11-21T09:00:05.000Z',
+};
+
+export const FIXTURE_MARKET_CONVERSATION_STATE = {
+  ...FIXTURE_MARKET_CONVERSATION,
+  status: 'queued' as const,
+  queuePosition: 2,
+  estimatedWaitSeconds: 40,
+  readyToPublish: false,
+  marketRequestId: null,
+  latestMessage: {
+    id: FIXTURE_MARKET_CONVERSATION_MESSAGE.id,
+    status: 'pending' as const,
+    createdAt: FIXTURE_MARKET_CONVERSATION_MESSAGE.createdAt,
+  },
+};
+
+export const FIXTURE_MARKET_CONVERSATION_TURN = {
+  turnNumber: 1,
+  role: 'assistant' as const,
+  content: 'What should the market resolve on, and by when?',
+  revision: 1,
+  createdAt: '2026-11-21T09:00:20.000Z',
+  updatedAt: '2026-11-21T09:00:20.000Z',
+};
+
+export const FIXTURE_MARKET_CONVERSATION_MESSAGE_BODY = {
+  content: 'Will Calgary get more than 10 cm of snow on 1 December 2026?',
+  declaredAction: 'create_market' as const,
+  timezone: 'America/Edmonton',
 };
 
 // -----------------------------------------------------------------
@@ -1095,6 +1145,96 @@ describe('wire-shape parity: partner withdrawal fee disclosure (optional)', () =
         ...FIXTURE_PARTNER_WITHDRAWAL_COMPLETED,
         networkFeeAtomic: 8000,
       }).success
+    ).toBe(false);
+  });
+});
+
+describe('wire-shape parity: market conversations', () => {
+  it('start and send envelopes', () => {
+    expectAccepts(
+      StartMarketConversationResponseSchema,
+      {
+        conversation: FIXTURE_MARKET_CONVERSATION,
+        data: FIXTURE_MARKET_CONVERSATION,
+        _meta: { ...FIXTURE_META, idempotent: false },
+      },
+      'StartMarketConversationResponse'
+    );
+    expectAccepts(
+      SendMarketConversationMessageResponseSchema,
+      {
+        message: FIXTURE_MARKET_CONVERSATION_MESSAGE,
+        data: FIXTURE_MARKET_CONVERSATION_MESSAGE,
+        _meta: { ...FIXTURE_META, idempotent: false },
+      },
+      'SendMarketConversationMessageResponse'
+    );
+  });
+
+  it('state: queued with a message, and idle before any message', () => {
+    expectAccepts(
+      GetMarketConversationResponseSchema,
+      {
+        conversation: FIXTURE_MARKET_CONVERSATION_STATE,
+        data: FIXTURE_MARKET_CONVERSATION_STATE,
+        _meta: FIXTURE_META,
+      },
+      'GetMarketConversationResponse'
+    );
+    expectAccepts(
+      MarketConversationStateSchema,
+      {
+        ...FIXTURE_MARKET_CONVERSATION_STATE,
+        status: 'idle',
+        queuePosition: null,
+        estimatedWaitSeconds: null,
+        latestMessage: null,
+      },
+      'MarketConversationState (no message)'
+    );
+  });
+
+  it('list and transcript envelopes, including the last page that keeps its position', () => {
+    expectAccepts(
+      ListMarketConversationsResponseSchema,
+      {
+        data: [FIXTURE_MARKET_CONVERSATION],
+        pagination: { cursor: null, hasMore: false, limit: 20 },
+        _meta: FIXTURE_META,
+      },
+      'ListMarketConversationsResponse'
+    );
+    expectAccepts(
+      ListMarketConversationMessagesResponseSchema,
+      {
+        data: [FIXTURE_MARKET_CONVERSATION_TURN],
+        pagination: { after: 'eyJ2IjoyfQ', hasMore: false, limit: 50 },
+        _meta: FIXTURE_META,
+      },
+      'ListMarketConversationMessagesResponse'
+    );
+    expectAccepts(
+      ListMarketConversationMessagesResponseSchema,
+      { data: [], pagination: { after: null, hasMore: false, limit: 50 }, _meta: FIXTURE_META },
+      'ListMarketConversationMessagesResponse (no turns)'
+    );
+  });
+
+  it('the message body is strict, and a valid one parses', () => {
+    expectAccepts(
+      SendMarketConversationMessageBodySchema,
+      FIXTURE_MARKET_CONVERSATION_MESSAGE_BODY,
+      'SendMarketConversationMessageBody'
+    );
+    expect(
+      SendMarketConversationMessageBodySchema.safeParse({ content: 'hi', contnet: 'x' }).success
+    ).toBe(false);
+  });
+
+  it('a turn revision must be a positive integer', () => {
+    expect(
+      MarketConversationTurnSchema.safeParse({ ...FIXTURE_MARKET_CONVERSATION_TURN, revision: 0 })
+        .success
     ).toBe(false);
   });
 });

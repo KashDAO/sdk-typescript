@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { isCompletedTrade, isPendingTrade, isTerminalTrade } from '../../src/guards.js';
 import { KashClient } from '../../src/index.js';
 import { PredictionResourceSchema, MarketResourceSchema } from '../../src/schemas/market.js';
+import { ClaimablePositionResourceSchema } from '../../src/schemas/portfolio.js';
 import { QuoteMarketSummarySchema } from '../../src/schemas/quote.js';
+import {
+  MarketConversationStateSchema,
+  MarketConversationTurnSchema,
+} from '../../src/schemas/market-conversation.js';
 import { RedemptionResourceSchema } from '../../src/schemas/redemption.js';
 import { TraceEventSchema } from '../../src/schemas/trace.js';
 import { TradeResourceSchema } from '../../src/schemas/trade.js';
@@ -19,6 +24,8 @@ import { WebhookEventResourceSchema } from '../../src/schemas/webhook.js';
 import { DEFAULT_REDEMPTION } from '../../src/testing/fixtures.js';
 import {
   FIXTURE_MARKET,
+  FIXTURE_MARKET_CONVERSATION_STATE,
+  FIXTURE_MARKET_CONVERSATION_TURN,
   FIXTURE_PREDICTION,
   FIXTURE_QUOTE_MARKET_SUMMARY,
   FIXTURE_TRACE_EVENT_INTENT,
@@ -103,6 +110,19 @@ describe('open response enums: an unknown value parses and is kept', () => {
     expect(event.type === 'trade.completed' && event.data.side).toBe(NEW);
   });
 
+  it('claimable position kind, quoteStatus and claimStatus', () => {
+    const item = ClaimablePositionResourceSchema.parse({
+      marketId: FIXTURE_TRADE.marketId,
+      outcomeIndex: 0,
+      kind: NEW,
+      shares: '1',
+      quotedAmountAtomic: null,
+      quoteStatus: NEW,
+      claimStatus: NEW,
+    });
+    expect([item.kind, item.quoteStatus, item.claimStatus]).toEqual([NEW, NEW, NEW]);
+  });
+
   it('healthCheck: an unknown server status is still ok, and is reported', async () => {
     const kash = new KashClient({
       apiKey: 'kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
@@ -131,6 +151,20 @@ describe('open response enums: what stays strict', () => {
         data: { ...FIXTURE_WEBHOOK_EVENT_TRADE_COMPLETED.data, status: 'failed' },
       }).success
     ).toBe(false);
+  });
+
+  it('market conversation status, latest message status and turn role', () => {
+    const state = MarketConversationStateSchema.parse({
+      ...FIXTURE_MARKET_CONVERSATION_STATE,
+      status: NEW,
+      latestMessage: { ...FIXTURE_MARKET_CONVERSATION_STATE.latestMessage, status: NEW },
+    });
+    const turn = MarketConversationTurnSchema.parse({
+      ...FIXTURE_MARKET_CONVERSATION_TURN,
+      role: NEW,
+    });
+
+    expect([state.status, state.latestMessage?.status, turn.role]).toEqual([NEW, NEW, NEW]);
   });
 
   it('an unknown trade status is neither terminal, pending nor completed', () => {

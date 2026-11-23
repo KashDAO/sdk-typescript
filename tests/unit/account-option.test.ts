@@ -43,6 +43,7 @@ function bodyFor(method: string, path: string): unknown {
     return { portfolio, _meta: META };
   }
   if (path === '/v1/portfolio/positions') return { data: [FIXTURE_POSITION], _meta: META };
+  if (path === '/v1/portfolio/claimable') return { data: [], _meta: META };
   if (path === '/v1/redemptions') {
     return { redemption: DEFAULT_REDEMPTION, _meta: { ...META, idempotent: false } };
   }
@@ -119,6 +120,7 @@ const ACCOUNT_SCOPED: ReadonlyArray<
   ],
   ['portfolio.get', 'GET', '/v1/portfolio', (k, o) => k.portfolio.get(o)],
   ['portfolio.positions', 'GET', '/v1/portfolio/positions', (k, o) => k.portfolio.positions({}, o)],
+  ['portfolio.claimable', 'GET', '/v1/portfolio/claimable', (k, o) => k.portfolio.claimable({}, o)],
   [
     'portfolio.watchPositions',
     'GET',

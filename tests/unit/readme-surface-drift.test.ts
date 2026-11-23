@@ -78,6 +78,8 @@ const KNOWN_SUBCLIENTS = new Set([
   'account',
   'balance',
   'partnerAccounts',
+  'redemptions',
+  'marketConversations',
 ]);
 
 /**

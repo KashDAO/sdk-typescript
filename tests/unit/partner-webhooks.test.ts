@@ -204,3 +204,29 @@ describe('constructEvent: partner webhooks', () => {
     expect(WebhookEventSchema.safeParse(body).success).toBe(true);
   });
 });
+
+describe('constructEvent: payout.completed reaches user keys too', () => {
+  // A user key receives its own user's payouts with neither account id; a
+  // partner key's delivery (the fixture) carries both.
+  const { accountId, externalId, ...userKeyData } = FIXTURE_PARTNER_WEBHOOK_PAYLOADS[
+    'payout.completed'
+  ] as Record<string, unknown>;
+
+  it("parses a user key's delivery, which names no account", async () => {
+    const env = partnerWebhookEnvelope('payout.completed');
+    const event = await construct({ ...env, data: userKeyData });
+
+    expect(event.type).toBe('payout.completed');
+    expect(event.data).toEqual(userKeyData);
+  });
+
+  it.each([
+    ['accountId without externalId', { accountId }],
+    ['externalId without accountId', { externalId }],
+  ])('refuses %s: it is neither key shape', async (_label, account) => {
+    const env = partnerWebhookEnvelope('payout.completed');
+    await expect(construct({ ...env, data: { ...userKeyData, ...account } })).rejects.toThrow(
+      KashValidationError
+    );
+  });
+});

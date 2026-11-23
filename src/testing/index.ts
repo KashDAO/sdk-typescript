@@ -60,8 +60,6 @@ import {
   KashValidationError,
   KashWebhookSignatureError,
 } from '../errors.js';
-import { validateIdempotencyKey } from '../internal/idempotency-key.js';
-import { Page } from '../internal/pagination.js';
 import { parseRequestBody, requireIdempotencyKey } from '../internal/request-body.js';
 import { pageLimit, validateUuid } from '../internal/request-options.js';
 import { parseWebhookEvent } from '../internal/webhook-event-parse.js';
@@ -90,6 +88,7 @@ import {
 import {
   DEFAULT_ACCOUNT_USAGE,
   DEFAULT_BALANCE,
+  DEFAULT_CLAIMABLE_POSITION,
   DEFAULT_COMPLETED_TRADE,
   DEFAULT_MARKET,
   DEFAULT_PARTNER_ACCOUNT,
@@ -106,6 +105,12 @@ import {
   DEFAULT_TRADE,
   DEFAULT_WEBHOOK_EVENT,
 } from './fixtures.js';
+import {
+  createMockMarketConversations,
+  type MockMarketConversations,
+  type MockMarketConversationsOverrides,
+} from './market-conversations.js';
+import { checkOptions, toMockPage, type MockListResult } from './mock-support.js';
 
 import type { HealthCheckResult } from '../client.js';
 import type { AccountClient } from '../clients/account.js';
@@ -126,7 +131,11 @@ import type {
   PartnerWithdrawalQuoteParams,
   WaitForWithdrawalOptions,
 } from '../clients/partner-withdrawals.js';
-import type { PortfolioClient, ListPositionsParams } from '../clients/portfolio.js';
+import type {
+  ListClaimableParams,
+  ListPositionsParams,
+  PortfolioClient,
+} from '../clients/portfolio.js';
 import type { QuotesClient, BuyQuoteParams, SellQuoteParams } from '../clients/quotes.js';
 import type {
   RedemptionsClient,
@@ -157,7 +166,11 @@ import type {
   MarketResource,
   PredictionResource,
 } from '../schemas/market.js';
-import type { PortfolioSummary, PositionResource } from '../schemas/portfolio.js';
+import type {
+  ClaimablePositionResource,
+  PortfolioSummary,
+  PositionResource,
+} from '../schemas/portfolio.js';
 import type { Quote, QuoteBuyDetail, QuoteSellDetail } from '../schemas/quote.js';
 import type { TraceResource } from '../schemas/trace.js';
 import type { ConstructedWebhookEvent } from '../schemas/webhook-event.js';
@@ -225,6 +238,10 @@ export type MockPortfolioOverrides = {
     params?: ListPositionsParams,
     opts?: AccountRequestOverrides
   ) => readonly PositionResource[] | Promise<readonly PositionResource[]>;
+  readonly claimable?: (
+    params?: ListClaimableParams,
+    opts?: AccountRequestOverrides
+  ) => readonly ClaimablePositionResource[] | Promise<readonly ClaimablePositionResource[]>;
 };
 
 export type MockWebhooksOverrides = {
@@ -334,24 +351,8 @@ export type MockKashClientOverrides = {
   readonly traces?: MockTracesOverrides;
   readonly balance?: MockBalanceOverrides;
   readonly partnerAccounts?: MockPartnerAccountsOverrides;
+  readonly marketConversations?: MockMarketConversationsOverrides;
   readonly healthCheck?: () => HealthCheckResult | Promise<HealthCheckResult>;
-};
-
-/**
- * Convenience shape for list-method overrides — the override returns
- * either a flat array of items (which the factory wraps in a single-
- * page {@link Page}) or a `{ data, hasMore?, nextCursor? }` object.
- */
-export type MockListResult<T> =
-  | readonly T[]
-  | Promise<readonly T[]>
-  | MockPageShape<T>
-  | Promise<MockPageShape<T>>;
-
-export type MockPageShape<T> = {
-  readonly data: readonly T[];
-  readonly hasMore?: boolean;
-  readonly nextCursor?: string | null;
 };
 
 // ---- Public mock surface ----------------------------------------------
@@ -359,7 +360,7 @@ export type MockPageShape<T> = {
 /**
  * The mock client surface: the real sub-client methods, picked by name, so
  * every mocked method takes exactly the real method's parameters (options
- * included) and returns its type. List methods return a {@link Page};
+ * included) and returns its type. List methods return a `Page`;
  * consumers can iterate or read `.data`.
  */
 export type MockKashClient = {
@@ -369,7 +370,7 @@ export type MockKashClient = {
   /** Every public quote method (`keyof` excludes the private transport). */
   readonly quotes: Pick<QuotesClient, keyof QuotesClient>;
   /** `watchPositions` is not mocked: it polls forever by design; stub it in the test that needs it. */
-  readonly portfolio: Pick<PortfolioClient, 'get' | 'positions'>;
+  readonly portfolio: Pick<PortfolioClient, 'get' | 'positions' | 'claimable'>;
   readonly webhooks: Pick<
     WebhooksClient,
     'list' | 'redeliver' | 'rotateSecret' | 'verifySignature' | 'constructEvent'
@@ -394,6 +395,7 @@ export type MockKashClient = {
       'quote' | 'create' | 'get' | 'list' | 'waitForCompletion'
     >;
   };
+  readonly marketConversations: MockMarketConversations;
   healthCheck(): Promise<HealthCheckResult>;
 };
 
@@ -417,6 +419,7 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
   const b = overrides.balance ?? {};
   const pa = overrides.partnerAccounts ?? {};
   const pw = pa.withdrawals ?? {};
+  const mc = overrides.marketConversations ?? {};
 
   return {
     markets: {
@@ -497,6 +500,10 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
       positions: async (params?: ListPositionsParams, opts?: AccountRequestOverrides) => {
         checkOptions(opts);
         return p.positions ? p.positions(params, opts) : [DEFAULT_POSITION];
+      },
+      claimable: async (params?: ListClaimableParams, opts?: AccountRequestOverrides) => {
+        checkOptions(opts);
+        return p.claimable ? p.claimable(params, opts) : [DEFAULT_CLAIMABLE_POSITION];
       },
     },
     webhooks: {
@@ -739,6 +746,7 @@ export function createMockKashClient(overrides: MockKashClientOverrides = {}): M
         },
       },
     },
+    marketConversations: createMockMarketConversations(mc),
     healthCheck: async () =>
       overrides.healthCheck
         ? overrides.healthCheck()
@@ -763,15 +771,6 @@ function defaultWithdrawalQuote(amountAtomic: string): PartnerWithdrawalQuote {
   };
 }
 
-/** The real client's option checks: a UUID `account`, a well-formed `Idempotency-Key`. */
-function checkOptions(opts?: {
-  readonly account?: string | undefined;
-  readonly idempotencyKey?: string | undefined;
-}): void {
-  if (opts?.account !== undefined) validateUuid(opts.account, 'account');
-  if (opts?.idempotencyKey !== undefined) validateIdempotencyKey(opts.idempotencyKey);
-}
-
 function defaultTradeCreate(body: CreateTradeBody): TradeCreateResult {
   return {
     ...DEFAULT_TRADE,
@@ -784,35 +783,18 @@ function defaultTradeCreate(body: CreateTradeBody): TradeCreateResult {
   };
 }
 
-/**
- * Wrap an array (or a `{ data, hasMore?, nextCursor? }` shape) in a
- * {@link Page} whose iterator terminates at the end of the supplied
- * data. The fetcher is a no-op — mock clients don't paginate.
- */
-function toMockPage<T>(result: readonly T[] | MockPageShape<T>, limit: number): Page<T> {
-  const isArray = Array.isArray(result);
-  const data = (isArray ? (result as readonly T[]) : (result as MockPageShape<T>).data) ?? [];
-  const hasMore = !isArray ? ((result as MockPageShape<T>).hasMore ?? false) : false;
-  const cursor = !isArray ? ((result as MockPageShape<T>).nextCursor ?? null) : null;
-  return new Page<T>(
-    {
-      data,
-      pagination: { cursor, hasMore, limit },
-    },
-    // No-op fetcher — if the iterator advances past this page, return
-    // an empty terminal page.
-    () => Promise.resolve({ data: [], pagination: { cursor: null, hasMore: false, limit } }),
-    { limit }
-  );
-}
-
 // Re-export fixtures so test files can import them from the same
 // barrel as the factory.
 export {
   DEFAULT_ACCOUNT_USAGE,
   DEFAULT_BALANCE,
+  DEFAULT_CLAIMABLE_POSITION,
   DEFAULT_COMPLETED_TRADE,
   DEFAULT_MARKET,
+  DEFAULT_MARKET_CONVERSATION,
+  DEFAULT_MARKET_CONVERSATION_MESSAGE,
+  DEFAULT_MARKET_CONVERSATION_STATE,
+  DEFAULT_MARKET_CONVERSATION_TURN,
   DEFAULT_PARTNER_ACCOUNT,
   DEFAULT_PARTNER_WITHDRAWAL,
   DEFAULT_PARTNER_WITHDRAWAL_QUOTE,
@@ -827,6 +809,13 @@ export {
   DEFAULT_TRADE,
   DEFAULT_WEBHOOK_EVENT,
 } from './fixtures.js';
+
+export type {
+  MockMarketConversationsOverrides,
+  MockTranscriptPage,
+  MockTranscriptResult,
+} from './market-conversations.js';
+export type { MockListResult, MockPageShape } from './mock-support.js';
 
 export { generateTestWebhookSignature } from './webhook-signature.js';
 export type { GenerateTestWebhookSignatureInput } from './webhook-signature.js';

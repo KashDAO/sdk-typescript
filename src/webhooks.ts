@@ -1,14 +1,15 @@
 /**
  * `@kashdao/sdk/webhooks`: the payload schemas and types of the partner
- * webhooks and of `trade.rejected`.
+ * webhooks, of `trade.rejected` and of `position.claimable`.
  *
  * `kash.webhooks.constructEvent` (root entry) already parses every event into
  * the typed `WebhookEvent` union, so most integrations need nothing from here.
  * Import from this subpath when you validate or type one payload on its own,
  * for example in a queue consumer that receives the payload without its
- * envelope. The schemas are re-exported from `@kashdao/sdk/schemas` (the build
- * keeps that import external), so each is the same object from either entry; the trade payload types stay on the
- * root entry.
+ * envelope. The schemas are re-exported from `@kashdao/sdk/schemas`, and the
+ * `position.claimable` one from `@kashdao/sdk/claimable` (the build keeps both
+ * imports external), so each is the same object from either entry; the trade
+ * payload types stay on the root entry.
  *
  * @module @kashdao/sdk/webhooks
  */
@@ -45,3 +46,4 @@ export type {
   WithdrawalFailureCode,
   WithdrawalSubmittedPayload,
 } from './schemas/webhook-event.js';
+export { PositionClaimablePayloadSchema, type PositionClaimablePayload } from './claimable.js';

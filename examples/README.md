@@ -3,16 +3,17 @@
 Runnable examples covering the most common SDK use cases. Each example is a
 single self-contained file you can drop into your own project.
 
-| Example                                              | What it shows                                            |
-| ---------------------------------------------------- | -------------------------------------------------------- |
-| [`01-basic-trade.ts`](./01-basic-trade.ts)           | Place a trade, wait for completion, log its chain        |
-| [`02-pagination.ts`](./02-pagination.ts)             | Two ways to consume `kash.markets.list()` (page vs walk) |
-| [`03-error-handling.ts`](./03-error-handling.ts)     | Branching on `KashError` subclasses                      |
-| [`04-webhooks.ts`](./04-webhooks.ts)                 | Verify a webhook signature in an Express handler         |
-| [`05-observability.ts`](./05-observability.ts)       | Wire the lifecycle hooks to a logger                     |
-| [`06-high-value-trade.ts`](./06-high-value-trade.ts) | Confirm a trade that hits the high-value gate            |
-| [`07-quotes.ts`](./07-quotes.ts)                     | On-chain price quotes (buy/sell) for slippage previews   |
-| [`08-redeem.ts`](./08-redeem.ts)                     | Redeem every settled position once markets resolve       |
+| Example                                                    | What it shows                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------- |
+| [`01-basic-trade.ts`](./01-basic-trade.ts)                 | Place a trade, wait for completion, log its chain           |
+| [`02-pagination.ts`](./02-pagination.ts)                   | Two ways to consume `kash.markets.list()` (page vs walk)    |
+| [`03-error-handling.ts`](./03-error-handling.ts)           | Branching on `KashError` subclasses                         |
+| [`04-webhooks.ts`](./04-webhooks.ts)                       | Verify a webhook signature in an Express handler            |
+| [`05-observability.ts`](./05-observability.ts)             | Wire the lifecycle hooks to a logger                        |
+| [`06-high-value-trade.ts`](./06-high-value-trade.ts)       | Confirm a trade that hits the high-value gate               |
+| [`07-quotes.ts`](./07-quotes.ts)                           | On-chain price quotes (buy/sell) for slippage previews      |
+| [`08-redeem.ts`](./08-redeem.ts)                           | Redeem every settled position once markets resolve          |
+| [`09-market-conversation.ts`](./09-market-conversation.ts) | Draft a market with the market creation assistant (preview) |
 
 > **Direct (self-orchestrated) mode** lives in [`@kashdao/protocol-sdk`](https://www.npmjs.com/package/@kashdao/protocol-sdk),
 > a separate package — see its README for examples that drop the Kash backend and sign on the consumer's own infra. Both packages are non-custodial: Kash never holds custody of user funds. On the API path, Kash submits the transactions you request from your wallet using a scoped, revocable permission you grant when you create an API key; with `@kashdao/protocol-sdk` you sign every transaction yourself.

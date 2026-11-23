@@ -134,6 +134,58 @@ describe('partnerAccounts.withdrawals.create', () => {
     });
   });
 
+  it('sends a stated destination when given, and omits it otherwise', async () => {
+    const destination = {
+      network: 'solana' as const,
+      address: FIXTURE_PARTNER_WITHDRAWAL.destination.address,
+    };
+    const { kash, calls } = setup(
+      jsonResponse(createBody(FIXTURE_PARTNER_WITHDRAWAL, false), 202),
+      jsonResponse(createBody(FIXTURE_PARTNER_WITHDRAWAL, false), 202)
+    );
+    await kash.partnerAccounts.withdrawals.create(
+      ACCOUNT_ID,
+      { amountAtomic: '2500000', destination },
+      { idempotencyKey: 'withdraw-dest' }
+    );
+    await kash.partnerAccounts.withdrawals.create(
+      ACCOUNT_ID,
+      { amountAtomic: '2500000' },
+      { idempotencyKey: 'withdraw-nodest' }
+    );
+    expect(calls[0]!.body).toEqual({ amountAtomic: '2500000', destination });
+    expect(calls[1]!.body).toEqual({ amountAtomic: '2500000' });
+    expect(Object.keys(calls[1]!.body as object)).toStrictEqual(['amountAtomic']);
+  });
+
+  it('refuses a destination with members beyond network and address before any request', async () => {
+    const { kash, calls } = setup();
+    await expect(
+      kash.partnerAccounts.withdrawals.create(
+        ACCOUNT_ID,
+        {
+          amountAtomic: '2500000',
+          destination: { network: 'solana', address: 'x', memo: 'y' },
+        } as never,
+        { idempotencyKey: 'withdraw-bad-dest' }
+      )
+    ).rejects.toBeInstanceOf(KashValidationError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('DESTINATION_MISMATCH: a KashValidationError the caller branches on by code', async () => {
+    const { kash } = setup(problem(422, 'DESTINATION_MISMATCH'));
+    const err = await kash.partnerAccounts.withdrawals
+      .create(
+        ACCOUNT_ID,
+        { amountAtomic: '2500000', destination: { network: 'solana', address: 'Other1111' } },
+        { idempotencyKey: 'withdraw-mismatch' }
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KashValidationError);
+    expect((err as KashValidationError).code).toBe(KASH_ERROR_CODE.DESTINATION_MISMATCH);
+  });
+
   it('reports the withdrawal an earlier request with this key made (200, _meta.idempotent) as existing, not a replay', async () => {
     const { kash } = setup(
       jsonResponse(createBody(FIXTURE_PARTNER_WITHDRAWAL_COMPLETED, true), 200)

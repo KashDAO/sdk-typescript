@@ -43,7 +43,7 @@ export type RequestOverrides = {
 
 /**
  * {@link RequestOverrides} for a call that acts for one account: balance,
- * trades, portfolio, positions, redemptions and traces.
+ * trades, portfolio, positions, redemptions, traces and market conversations.
  *
  * A partner key has no user of its own; it names the partner account it acts
  * for with `account`, sent as the `Kash-Account` header. A user key always
@@ -122,12 +122,12 @@ export function validateUuid(value: unknown, field: string): asserts value is st
 }
 
 /**
- * The page size for a partner list: `limit` if it is a whole number from 1 to
- * 100 (the API's bounds), else `KashValidationError` before any request.
- * Default 20, the API's.
+ * The page size for a list whose API bounds are 1 to 100: `limit` if it is a
+ * whole number in that range, else `KashValidationError` before any request.
+ * `defaultLimit` is the route's own default (20 on most lists).
  */
-export function pageLimit(limit: number | undefined, label: string): number {
-  if (limit === undefined) return 20;
+export function pageLimit(limit: number | undefined, label: string, defaultLimit = 20): number {
+  if (limit === undefined) return defaultLimit;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     throw new KashValidationError(`${label}: limit must be a whole number from 1 to 100.`, {
       code: 'SDK_VALIDATION',

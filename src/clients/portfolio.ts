@@ -1,15 +1,17 @@
 /**
- * `portfolio` sub-client — wraps `GET /v1/portfolio` and
- * `GET /v1/portfolio/positions`, plus `watchPositions`, the polling loop
- * the API is built to serve cheaply.
+ * `portfolio` sub-client — wraps `GET /v1/portfolio`,
+ * `GET /v1/portfolio/positions` and `GET /v1/portfolio/claimable`, plus
+ * `watchPositions`, the polling loop the API is built to serve cheaply.
  */
 
 import { KashConfigurationError } from '../errors.js';
 import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import { sleepWithAbort } from '../internal/sleep.js';
 import {
+  ClaimablePositionsResponseSchema,
   PortfolioSummaryResponseSchema,
   PositionsResponseSchema,
+  type ClaimablePositionResource,
   type PortfolioSummary,
   type PositionResource,
 } from '../schemas/portfolio.js';
@@ -18,6 +20,11 @@ import type { KashHttpClient } from '../internal/http.js';
 
 export type ListPositionsParams = {
   /** Optional single-market filter. */
+  readonly marketId?: string;
+};
+
+export type ListClaimableParams = {
+  /** Optional single-market filter: what can be claimed in this market. */
   readonly marketId?: string;
 };
 
@@ -74,6 +81,27 @@ export class PortfolioClient {
       path: '/portfolio/positions',
       method: 'GET',
       schema: PositionsResponseSchema,
+      query: { marketId: params.marketId },
+      ...accountOverrides(opts),
+    });
+    return result.data;
+  }
+
+  /**
+   * Every position the account can claim now with `redemptions.create`, for
+   * the key's user or the account named by `opts.account`, with the chain's
+   * quote for each claim (`quotedAmountAtomic`, `null` when it could not be
+   * read). Call it when the `position.claimable` webhook arrives, or when the
+   * user opens the claim screen.
+   */
+  async claimable(
+    params: ListClaimableParams = {},
+    opts: AccountRequestOverrides = {}
+  ): Promise<readonly ClaimablePositionResource[]> {
+    const result = await this.http.request({
+      path: '/portfolio/claimable',
+      method: 'GET',
+      schema: ClaimablePositionsResponseSchema,
       query: { marketId: params.marketId },
       ...accountOverrides(opts),
     });

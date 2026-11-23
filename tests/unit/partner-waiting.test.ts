@@ -7,7 +7,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { KashAbortedError, KashConflictError, KashTimeoutError } from '../../src/errors.js';
+import {
+  KashAbortedError,
+  KashConflictError,
+  KashTimeoutError,
+  KashValidationError,
+} from '../../src/errors.js';
 import { KashClient } from '../../src/index.js';
 import {
   FIXTURE_PARTNER_ACCOUNT,
@@ -183,4 +188,40 @@ describe('partnerAccounts.withdrawals.waitForCompletion', () => {
     expect(await done).toBeInstanceOf(KashTimeoutError);
     expect(gets()).toBe(4);
   });
+});
+
+describe('the partner waits refuse timing that never ends or never pauses', () => {
+  const CASES = [
+    [{ pollIntervalMs: 0 }, 'pollIntervalMs'],
+    [{ pollIntervalMs: -1 }, 'pollIntervalMs'],
+    [{ pollIntervalMs: 3e9 }, 'pollIntervalMs'],
+    [{ timeoutMs: Number.POSITIVE_INFINITY }, 'timeoutMs'],
+  ] as const;
+
+  it.each(CASES)('waitUntilActive refuses %o before any request', async (opts, path) => {
+    const { kash, gets } = clientAnswering([accountBody(FIXTURE_PARTNER_ACCOUNT_PROVISIONING)]);
+    const err = await kash.partnerAccounts
+      .waitUntilActive(ACCOUNT_ID, opts)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KashValidationError);
+    expect((err as KashValidationError).message).toContain(
+      `partnerAccounts.waitUntilActive: ${path}`
+    );
+    expect(gets()).toBe(0);
+  });
+
+  it.each(CASES)(
+    'withdrawals.waitForCompletion refuses %o before any request',
+    async (opts, path) => {
+      const { kash, gets } = clientAnswering([withdrawalBody(FIXTURE_PARTNER_WITHDRAWAL)]);
+      const err = await kash.partnerAccounts.withdrawals
+        .waitForCompletion(ACCOUNT_ID, WITHDRAWAL_ID, opts)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KashValidationError);
+      expect((err as KashValidationError).message).toContain(
+        `partnerAccounts.withdrawals.waitForCompletion: ${path}`
+      );
+      expect(gets()).toBe(0);
+    }
+  );
 });

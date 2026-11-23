@@ -1,6 +1,6 @@
 {
   "name": "@kashdao/sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Official non-custodial TypeScript SDK for the Kash public API. Native fetch, zero runtime deps beyond Zod, ESM + CJS.",
   "license": "MIT",
   "author": {
@@ -76,6 +76,26 @@
       "require": {
         "types": "./dist/schemas.d.cts",
         "default": "./dist/schemas.cjs"
+      }
+    },
+    "./claimable": {
+      "import": {
+        "types": "./dist/claimable.d.ts",
+        "default": "./dist/claimable.js"
+      },
+      "require": {
+        "types": "./dist/claimable.d.cts",
+        "default": "./dist/claimable.cjs"
+      }
+    },
+    "./market-conversations": {
+      "import": {
+        "types": "./dist/market-conversations.d.ts",
+        "default": "./dist/market-conversations.js"
+      },
+      "require": {
+        "types": "./dist/market-conversations.d.cts",
+        "default": "./dist/market-conversations.cjs"
       }
     },
     "./package.json": "./package.json"

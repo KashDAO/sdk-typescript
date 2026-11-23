@@ -132,7 +132,7 @@ excluded as an external:
 | Entry                  | Cap   |
 | ---------------------- | ----- |
 | `@kashdao/sdk`         | 24 KB |
-| `@kashdao/sdk/testing` | 8 KB  |
+| `@kashdao/sdk/testing` | 9 KB  |
 
 `pnpm size` fails when an entry exceeds its cap, and the release script
 (`scripts/publish.sh`) refuses to publish until it passes. If your change

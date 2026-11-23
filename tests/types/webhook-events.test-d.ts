@@ -47,7 +47,26 @@ describe('constructEvent result', () => {
       case 'account.released':
       case 'withdrawal.submitted':
       case 'withdrawal.completed':
+        break;
       case 'payout.completed':
+        expectTypeOf(event.data.accountId).toEqualTypeOf<string | undefined>();
+        // Both account ids or neither: narrowing on one gives the other.
+        if (event.data.accountId !== undefined) {
+          expectTypeOf(event.data.externalId).toEqualTypeOf<string>();
+        } else {
+          expectTypeOf(event.data.externalId).toEqualTypeOf<undefined>();
+        }
+        expectTypeOf(event.data.amountAtomic).toBeString();
+        break;
+      case 'position.claimable':
+        expectTypeOf(event.data.accountId).toEqualTypeOf<string | undefined>();
+        // Both account ids or neither: narrowing on one gives the other.
+        if (event.data.accountId !== undefined) {
+          expectTypeOf(event.data.externalId).toEqualTypeOf<string>();
+        } else {
+          expectTypeOf(event.data.externalId).toEqualTypeOf<undefined>();
+        }
+        expectTypeOf(event.data.outcomes[0]?.shares).toEqualTypeOf<string | undefined>();
         break;
       default:
         expectTypeOf(event).toBeNever();

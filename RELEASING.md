@@ -103,7 +103,9 @@ those, and describe each change under Changed.
 Then update `packages/sdk/CHANGELOG.md`: rename `[Unreleased]` to the new
 version + date, leave a fresh empty `[Unreleased]` heading on top.
 
-Land on monorepo `main`.
+Land on monorepo `staging`. Monorepo `main` reaches the release when it next
+fast-forwards after a production release; nothing is committed on `main`
+(`docs/runbooks/promotion-and-deployment.md`, "kash `main`").
 
 > **Independence from `@kashdao/protocol-sdk`**: this package has no
 > runtime dependency on `@kashdao/protocol-sdk`. The two SDKs release
@@ -261,6 +263,15 @@ node -e 'import("@kashdao/sdk").then(s => console.log(s.USER_AGENT))'
 ```
 
 If that prints the expected user-agent line, the release is real.
+
+### 7. Move the starters to the new minor
+
+The starters under `examples/starters/` install `@kashdao/sdk` from npm,
+and on 0.x a caret range stays inside one minor: `^0.4.0` never installs
+0.5.0. After a minor release is on npm (not before, since the range cannot
+install until it is), set each starter's `@kashdao/sdk` range to the new
+minor (`^0.5.0`) in one monorepo commit, and carry it to the mirror with
+the next sync.
 
 ## Hotfix process
 

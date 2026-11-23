@@ -48,6 +48,14 @@ export const KASH_ERROR_CODE = Object.freeze({
   WITHDRAWAL_BELOW_MINIMUM: 'WITHDRAWAL_BELOW_MINIMUM',
   /** 409: withdrawals are held for 24 hours after a destination change; see `retryAfterSeconds`. */
   WITHDRAWALS_HELD: 'WITHDRAWALS_HELD',
+  /** 422: the request stated a destination other than the account's registered one. */
+  DESTINATION_MISMATCH: 'DESTINATION_MISMATCH',
+  /** 422: Kash cannot send to this destination; which check refused it is not said. Register another. */
+  RECIPIENT_NOT_ALLOWED: 'RECIPIENT_NOT_ALLOWED',
+  /** 409: over the user's 10,000 USDC rolling 24-hour withdrawal limit; see `retryAfterSeconds`. */
+  DAILY_LIMIT_EXCEEDED: 'DAILY_LIMIT_EXCEEDED',
+  /** 422: withdrawals to the destination's network are paused. */
+  WITHDRAWAL_NETWORK_DISABLED: 'WITHDRAWAL_NETWORK_DISABLED',
   /** 409: the available balance does not cover the amount. */
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
   /** 409: the `Idempotency-Key` was already used with a different request. */
@@ -73,6 +81,25 @@ export const KASH_ERROR_CODE = Object.freeze({
   CLIENT_REQUEST_ID_CONFLICT: 'CLIENT_REQUEST_ID_CONFLICT',
   /** 410: the key is past the API's retention window; send the request with a new key. */
   IDEMPOTENCY_KEY_EXPIRED: 'IDEMPOTENCY_KEY_EXPIRED',
+  /**
+   * 422: the market conversation message breaks Kash's market content rules.
+   * `extensions.reason` names the rule (narrow with `isMarketContentRefusal`)
+   * and the message is the server's `detail`, written to show the user.
+   * Sending the same text again is refused again.
+   */
+  MARKET_CONTENT_REFUSED: 'MARKET_CONTENT_REFUSED',
+  /**
+   * 429: the user or the key has used today's market conversation allowance;
+   * `retryAfterSeconds` runs to 00:00 UTC, when it resets.
+   */
+  MARKET_CREATION_DAILY_LIMIT_REACHED: 'MARKET_CREATION_DAILY_LIMIT_REACHED',
+  /** 404: the market conversation is unknown or not this caller's, the same for both by design. */
+  MARKET_CONVERSATION_NOT_FOUND: 'MARKET_CONVERSATION_NOT_FOUND',
+  /**
+   * 409: the key no longer qualifies to write to the conversation (revoked or
+   * expired since it was read). Send again with a live key of the same user.
+   */
+  MARKET_CONVERSATION_NOT_WRITABLE: 'MARKET_CONVERSATION_NOT_WRITABLE',
   /** 429: a rate limit ran out; see `retryAfterSeconds`. */
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
   /** 503: the route is switched off for now; `extensions.flag` names it. */

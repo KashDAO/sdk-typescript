@@ -12,13 +12,23 @@
 
 import type { AccountUsage } from '../schemas/account.js';
 import type { BalanceResource } from '../schemas/balance.js';
+import type {
+  MarketConversationMessageResource,
+  MarketConversationResource,
+  MarketConversationState,
+  MarketConversationTurn,
+} from '../schemas/market-conversation.js';
 import type { MarketResource, PredictionResource } from '../schemas/market.js';
 import type { PartnerAccountResource } from '../schemas/partner-account.js';
 import type {
   PartnerWithdrawalQuote,
   PartnerWithdrawalResource,
 } from '../schemas/partner-withdrawal.js';
-import type { PortfolioSummary, PositionResource } from '../schemas/portfolio.js';
+import type {
+  ClaimablePositionResource,
+  PortfolioSummary,
+  PositionResource,
+} from '../schemas/portfolio.js';
 import type {
   Quote,
   QuoteBuyDetail,
@@ -132,6 +142,20 @@ export const DEFAULT_POSITION: PositionResource = {
   tradeCount: 1,
   firstTradeAt: ISO_FIXED,
   lastTradeAt: ISO_FIXED,
+};
+
+/**
+ * Default {@link ClaimablePositionResource}: the winning outcome 0 of a
+ * resolved market, quoted at 1.680305 USDC.
+ */
+export const DEFAULT_CLAIMABLE_POSITION: ClaimablePositionResource = {
+  marketId: MARKET_ID,
+  outcomeIndex: 0,
+  kind: 'resolved',
+  shares: '1817600000000000000',
+  quotedAmountAtomic: '1680305',
+  quoteStatus: 'quoted',
+  claimStatus: 'claimable',
 };
 
 const DEFAULT_QUOTE_MARKET_SUMMARY: QuoteMarketSummary = {
@@ -341,4 +365,42 @@ export const DEFAULT_BALANCE: BalanceResource = {
   pendingWithdrawalsAtomic: '2500000',
   availableAtomic: '22500000',
   observedAt: ISO_FIXED,
+};
+
+/** Default {@link MarketConversationResource}: a conversation just started. */
+export const DEFAULT_MARKET_CONVERSATION: MarketConversationResource = {
+  id: '00000000-0000-4000-8000-0000000000c1',
+  createdAt: ISO_FIXED,
+};
+
+/** Default {@link MarketConversationMessageResource}: a message just queued. */
+export const DEFAULT_MARKET_CONVERSATION_MESSAGE: MarketConversationMessageResource = {
+  id: '00000000-0000-4000-8000-0000000000d1',
+  conversationId: DEFAULT_MARKET_CONVERSATION.id,
+  createdAt: ISO_FIXED,
+};
+
+/** Default {@link MarketConversationState}: idle, its latest message answered. */
+export const DEFAULT_MARKET_CONVERSATION_STATE: MarketConversationState = {
+  ...DEFAULT_MARKET_CONVERSATION,
+  status: 'idle',
+  queuePosition: null,
+  estimatedWaitSeconds: null,
+  readyToPublish: false,
+  marketRequestId: null,
+  latestMessage: {
+    id: DEFAULT_MARKET_CONVERSATION_MESSAGE.id,
+    status: 'published',
+    createdAt: ISO_FIXED,
+  },
+};
+
+/** Default {@link MarketConversationTurn}: the assistant's first reply. */
+export const DEFAULT_MARKET_CONVERSATION_TURN: MarketConversationTurn = {
+  turnNumber: 1,
+  role: 'assistant',
+  content: 'What should the market resolve on, and by when?',
+  revision: 1,
+  createdAt: ISO_FIXED,
+  updatedAt: ISO_FIXED,
 };

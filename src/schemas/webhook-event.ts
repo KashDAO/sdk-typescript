@@ -197,13 +197,21 @@ export type PartnerAccountFailureReason = z.infer<typeof PartnerAccountFailureRe
  * The network a partner account's withdrawals are sent on. Open: a network
  * Kash adds later parses as its string rather than failing the payload.
  */
-export const PartnerDestinationNetworkSchema = openEnum(['solana', 'arc']);
+export const PartnerDestinationNetworkSchema = openEnum([
+  'solana',
+  'arc',
+  'base',
+  'ethereum',
+  'arbitrum',
+  'optimism',
+  'polygon',
+]);
 
 export type PartnerDestinationNetwork = z.infer<typeof PartnerDestinationNetworkSchema>;
 
 /**
  * An account's registered withdrawal destination. `address` is an opaque
- * chain address: base58 on Solana, `0x` hex on Arc.
+ * chain address: base58 on Solana, `0x` hex on every other network.
  */
 export const PartnerDestinationSchema = z.object({
   network: PartnerDestinationNetworkSchema,
@@ -342,8 +350,14 @@ export const WithdrawalFailedPayloadSchema = partnerWithdrawalCommonSchema.exten
 
 export type WithdrawalFailedPayload = z.infer<typeof WithdrawalFailedPayloadSchema>;
 
-/** `payout.completed`: winnings from a resolved market were paid into the account. */
-export const PayoutCompletedPayloadSchema = partnerAccountRefSchema.extend({
+// -----------------------------------------------------------------
+// `payout.completed` and `position.claimable`: like the trade events, any key
+// receives them, in one of two shapes: a partner key's names the account by
+// BOTH `accountId` and `externalId`, a user key's (its own user) by NEITHER.
+// A body with only one of the two is refused.
+// -----------------------------------------------------------------
+
+const payoutCompletedBody = {
   payoutId: z.guid(),
   marketId: z.guid(),
   outcomeIndex: z.number().int().nonnegative(),
@@ -353,9 +367,68 @@ export const PayoutCompletedPayloadSchema = partnerAccountRefSchema.extend({
   chainRef: z.string().min(1),
   transactionHash: chainTxIdSchema,
   paidAt: partnerTimestampSchema,
-});
+};
+
+/**
+ * `payout.completed`: winnings or a refund were paid into the user's wallet.
+ * A partner key receives one per payout of a partner account, with BOTH
+ * `accountId` and `externalId`; a user key receives one per payout of its own
+ * user, with NEITHER. Narrow on `accountId`:
+ * `if (data.accountId !== undefined)` gives `externalId` as a string.
+ */
+export const PayoutCompletedPayloadSchema = z.union([
+  partnerAccountRefSchema.extend(payoutCompletedBody),
+  z.object({
+    accountId: z.undefined().optional(),
+    externalId: z.undefined().optional(),
+    ...payoutCompletedBody,
+  }),
+]);
 
 export type PayoutCompletedPayload = z.infer<typeof PayoutCompletedPayloadSchema>;
+
+const positionClaimableBody = {
+  marketId: z.guid(),
+  /** Open: a kind added on the server parses as its string. */
+  kind: openEnum(['resolved', 'cancelled']),
+  outcomes: z
+    .array(
+      z.object({
+        outcomeIndex: z.number().int().nonnegative(),
+        /** Outcome tokens held, as an 18-decimal integer string. */
+        shares: z.string().regex(/^[1-9]\d*$/, 'a positive 18-decimal integer string'),
+      })
+    )
+    .min(1),
+};
+
+/**
+ * `position.claimable`: a market the holder has a position in opened its
+ * winnings (`resolved`) or its cancel refunds (`cancelled`) for claiming,
+ * listing every claimable outcome. It arrives in one of two shapes: a partner
+ * key receives one per partner account with BOTH `accountId` and
+ * `externalId`; a user key receives one for its own user with NEITHER. A body
+ * with only one of the two is refused. Narrow on `accountId`:
+ * `if (data.accountId !== undefined)` gives `externalId` as a string. It
+ * carries no amount: read it from `GET /v1/portfolio/claimable`
+ * (`portfolio.claimable()`), then claim with `POST /v1/redemptions`.
+ */
+export const PositionClaimablePayloadSchema = z.union([
+  z.object({
+    /** Kash's id for the account holding the position: send it as `account`. */
+    accountId: z.guid(),
+    /** Your own id for the user. */
+    externalId: z.string().min(1).max(128),
+    ...positionClaimableBody,
+  }),
+  z.object({
+    accountId: z.undefined().optional(),
+    externalId: z.undefined().optional(),
+    ...positionClaimableBody,
+  }),
+]);
+
+export type PositionClaimablePayload = z.infer<typeof PositionClaimablePayloadSchema>;
 
 // -----------------------------------------------------------------
 // Outer envelope — every customer-facing webhook body has this shape.
@@ -408,6 +481,7 @@ export const WebhookEventSchema = z.discriminatedUnion('type', [
   envelope('withdrawal.completed', WithdrawalCompletedPayloadSchema),
   envelope('withdrawal.failed', WithdrawalFailedPayloadSchema),
   envelope('payout.completed', PayoutCompletedPayloadSchema),
+  envelope('position.claimable', PositionClaimablePayloadSchema),
 ]);
 
 /**

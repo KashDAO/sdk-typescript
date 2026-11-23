@@ -3,7 +3,8 @@
  * `/v1/partner/accounts/{accountId}/withdrawals`.
  *
  * A withdrawal always goes to the account's registered destination; the
- * request names only an amount. Amounts are integer strings in USDC atomic
+ * request names an amount and may state that destination to confirm it,
+ * never another (`DESTINATION_MISMATCH`). Amounts are integer strings in USDC atomic
  * units (6 decimals), never numbers. Requires a partner API key with the
  * `partner:accounts` scope.
  */
@@ -26,8 +27,22 @@ export const WithdrawalAmountAtomicSchema = z
     'must be a positive whole number of atomic USDC units, such as 2500000'
   );
 
-/** Body for {@link PartnerWithdrawalsClient.create}, and the query of `quote`. */
+/**
+ * Body for {@link PartnerWithdrawalsClient.create}. `destination` is
+ * optional: when given it must be the account's registered destination (the
+ * API answers `422 DESTINATION_MISMATCH` otherwise; a `0x` address is
+ * compared without regard to letter case), and a retry with the same key
+ * that states a different destination is `IDEMPOTENCY_KEY_CONFLICT`.
+ */
 export const CreatePartnerWithdrawalBodySchema = z
+  .object({
+    amountAtomic: WithdrawalAmountAtomicSchema,
+    destination: PartnerDestinationSchema.strict().optional(),
+  })
+  .strict();
+
+/** Query of {@link PartnerWithdrawalsClient.quote}: the amount only. */
+export const PartnerWithdrawalQuoteParamsSchema = z
   .object({ amountAtomic: WithdrawalAmountAtomicSchema })
   .strict();
 

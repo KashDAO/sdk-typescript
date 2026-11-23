@@ -1,10 +1,12 @@
 /**
- * Portfolio schemas — the wire shapes for `GET /v1/portfolio` and
- * `GET /v1/portfolio/positions`. Validated end-to-end via Zod.
+ * Portfolio schemas — the wire shapes for `GET /v1/portfolio`,
+ * `GET /v1/portfolio/positions` and `GET /v1/portfolio/claimable`. Validated
+ * end-to-end via Zod.
  */
 
 import { z } from 'zod';
 
+import { openEnum } from './_open-enum.js';
 import { MetaSchema } from './envelope.js';
 
 export const PositionResourceSchema = z.object({
@@ -54,3 +56,46 @@ export const PortfolioSummaryResponseSchema = z.object({
 });
 
 export type PortfolioSummaryResponse = z.infer<typeof PortfolioSummaryResponseSchema>;
+
+/**
+ * One position the account can claim now with `POST /v1/redemptions`
+ * (`redemptions.create`): a winning outcome of a resolved market, or a
+ * holding in a cancelled market refunded at the cancel price.
+ */
+export const ClaimablePositionResourceSchema = z.object({
+  /** With `outcomeIndex`, what to send to `redemptions.create`. */
+  marketId: z.guid(),
+  outcomeIndex: z.number().int().nonnegative(),
+  /** `resolved`: a winning outcome. `cancelled`: a refund at the cancel price. */
+  kind: openEnum(['resolved', 'cancelled']),
+  /**
+   * Outcome tokens the claim redeems, WAD-encoded (18 decimals) integer
+   * string: the on-chain balance when it was read, else the indexed holding.
+   */
+  shares: z.string().regex(/^\d+$/),
+  /**
+   * USDC atomic units (6 decimals): the chain's quote for the claim, a minimum
+   * of what it pays before the network fee, so show it as "about". `null`
+   * when the quote could not be read (`quoteStatus: 'unavailable'`), never 0.
+   */
+  quotedAmountAtomic: z.string().regex(/^\d+$/).nullable(),
+  quoteStatus: openEnum(['quoted', 'unavailable']),
+  /**
+   * `claimable`; `claim_failed` when an earlier claim for this position
+   * failed in a way a new claim cannot replace: send the user to support
+   * rather than offering a claim; or `claims_paused` when Kash has paused
+   * claiming, so `redemptions.create` would refuse every claim now: show the
+   * amount, offer no claim, and list again later. `claims_paused` takes
+   * precedence over the other two.
+   */
+  claimStatus: openEnum(['claimable', 'claim_failed', 'claims_paused']),
+});
+
+export type ClaimablePositionResource = z.infer<typeof ClaimablePositionResourceSchema>;
+
+export const ClaimablePositionsResponseSchema = z.object({
+  data: z.array(ClaimablePositionResourceSchema),
+  _meta: MetaSchema,
+});
+
+export type ClaimablePositionsResponse = z.infer<typeof ClaimablePositionsResponseSchema>;

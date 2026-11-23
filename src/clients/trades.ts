@@ -18,7 +18,7 @@
 import { KashConflictError, KashError } from '../errors.js';
 import { autoIdempotencyKey } from '../internal/idempotency-key.js';
 import { buildPage, type Page } from '../internal/pagination.js';
-import { pollUntil } from '../internal/polling.js';
+import { pollTiming, pollUntil } from '../internal/polling.js';
 import { parseRequestBody } from '../internal/request-body.js';
 import { accountOverrides, type AccountRequestOverrides } from '../internal/request-options.js';
 import {
@@ -97,9 +97,9 @@ export type TradeCreateResult = TradeResource & {
 };
 
 export type WaitForCompletionOptions = {
-  /** Total time budget across all polls. Default 60s. */
+  /** Total time budget across all polls. Default 60s. A value that is not a finite number of 0 or more is refused with `KashValidationError`. */
   readonly timeoutMs?: number;
-  /** Delay between polls. Default 2s. */
+  /** Delay between polls. Default 2s; at least 1 ms and at most 2,147,483,647 ms (the longest delay a timer honours); anything else is refused with `KashValidationError`. */
   readonly pollIntervalMs?: number;
   /** Invoked with each fetched trade — useful for status logs. */
   readonly onStatus?: (trade: TradeResource) => void;
@@ -312,6 +312,10 @@ export class TradesClient {
    * "confirm this trade first".
    */
   async waitForCompletion(id: string, opts: WaitForCompletionOptions = {}): Promise<TradeResource> {
+    const timing = pollTiming('trades.waitForCompletion', {
+      timeoutMs: opts.timeoutMs ?? 60_000,
+      pollIntervalMs: opts.pollIntervalMs ?? 2_000,
+    });
     // Forward the caller's signal to every inner GET so an abort
     // during an in-flight poll cancels the request itself, not just
     // the polling loop's next iteration.
@@ -336,8 +340,7 @@ export class TradesClient {
       (): Promise<TradeResource> => this.get(id, inner),
       (trade) => TERMINAL_TRADE_STATUSES.includes(trade.status),
       {
-        timeoutMs: opts.timeoutMs ?? 60_000,
-        pollIntervalMs: opts.pollIntervalMs ?? 2_000,
+        timing,
         ...(opts.onStatus === undefined ? {} : { onStatus: opts.onStatus }),
         ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       }

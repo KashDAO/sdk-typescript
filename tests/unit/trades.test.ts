@@ -457,6 +457,20 @@ describe('TradesClient', () => {
     ).rejects.toBeInstanceOf(KashTimeoutError);
   });
 
+  it.each([
+    [{ pollIntervalMs: 0 }, 'pollIntervalMs'],
+    [{ pollIntervalMs: Number.NaN }, 'pollIntervalMs'],
+    [{ pollIntervalMs: Number.POSITIVE_INFINITY }, 'pollIntervalMs'],
+    [{ timeoutMs: Number.NaN }, 'timeoutMs'],
+  ])('waitForCompletion — refuses %o before any request', async (opts, path) => {
+    const fetchSpy = vi.fn();
+    const kash = makeKash(fetchSpy as typeof fetch);
+    const err = await kash.trades.waitForCompletion(TRADE_BASE.id, opts).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KashValidationError);
+    expect((err as KashValidationError).message).toContain(`trades.waitForCompletion: ${path}`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('create — pre-validates body shape and surfaces structured issues', async () => {
     const fetchSpy = vi.fn();
     const kash = makeKash(fetchSpy as typeof fetch);

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { KashRateLimitError, KashValidationError } from '../../src/index.js';
+import { ClaimablePositionsResponseSchema } from '../../src/claimable.js';
 import {
   ListMarketsResponseSchema,
   ListPredictionsResponseSchema,
@@ -27,6 +28,7 @@ import {
   DEFAULT_QUOTE_BUY,
   DEFAULT_QUOTE_SELL,
   DEFAULT_PORTFOLIO_SUMMARY,
+  DEFAULT_CLAIMABLE_POSITION,
   DEFAULT_POSITION,
   DEFAULT_REDELIVER_EVENT,
   DEFAULT_REDEMPTION,
@@ -73,6 +75,13 @@ describe('createMockKashClient — defaults are wire-shape-valid', () => {
 
     expect(
       PositionsResponseSchema.safeParse({ data: [DEFAULT_POSITION], _meta: META }).success
+    ).toBe(true);
+
+    expect(
+      ClaimablePositionsResponseSchema.safeParse({
+        data: [DEFAULT_CLAIMABLE_POSITION],
+        _meta: META,
+      }).success
     ).toBe(true);
 
     expect(
@@ -467,6 +476,25 @@ describe('createMockKashClient — overrides', () => {
       marketId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
     });
     expect(Array.isArray(positions)).toBe(true);
+  });
+
+  it('portfolio.claimable answers the default fixture, or the override with its arguments', async () => {
+    expect(await createMockKashClient().portfolio.claimable()).toEqual([
+      DEFAULT_CLAIMABLE_POSITION,
+    ]);
+
+    const seen: unknown[] = [];
+    const kash = createMockKashClient({
+      portfolio: {
+        claimable: (params, opts) => {
+          seen.push(params, opts);
+          return [];
+        },
+      },
+    });
+    const marketId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    expect(await kash.portfolio.claimable({ marketId }, { account: marketId })).toEqual([]);
+    expect(seen).toEqual([{ marketId }, { account: marketId }]);
   });
 
   it('webhooks.redeliver default propagates the requested eventId', async () => {

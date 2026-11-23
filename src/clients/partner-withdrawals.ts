@@ -3,7 +3,8 @@
  * `/v1/partner/accounts/{accountId}/withdrawals`.
  *
  * Sends an account's USDC to its registered destination. The request names
- * only the amount, in USDC atomic units as a string. Requires a partner key
+ * the amount, in USDC atomic units as a string, and may state the registered
+ * destination to confirm it. Requires a partner key
  * with the `partner:accounts` scope. The account is named in the path, so
  * these methods take no `account` option.
  *
@@ -17,12 +18,25 @@
  *   - `INSUFFICIENT_BALANCE` ({@link KashConflictError}): the amount, plus the
  *     network fee to Arc, is above `availableAtomic`. The quote's
  *     `maxAmountAtomic` is the limit.
- *   - `WITHDRAWAL_BELOW_MINIMUM` ({@link KashValidationError}): below 1 USDC
+ *   - `WITHDRAWAL_BELOW_MINIMUM` ({@link KashValidationError}): below 2 USDC
  *     to Arc, or no more than the network fee could cost.
  *   - `DESTINATION_NOT_SUPPORTED` ({@link KashValidationError}, 422): Kash
  *     cannot withdraw to the account's destination network here.
  *   - `IDEMPOTENCY_KEY_CONFLICT` ({@link KashConflictError}): the key was used
- *     for a different amount.
+ *     for a different amount, or a different stated destination.
+ *   - `DESTINATION_MISMATCH` ({@link KashValidationError}, 422): the request
+ *     stated a destination other than the account's registered one.
+ *
+ * Once the unified withdrawal limits are enabled for partner withdrawals:
+ *
+ *   - `DAILY_LIMIT_EXCEEDED` ({@link KashConflictError}): over 10,000 USDC in
+ *     a rolling 24 hours for the user; `retryAfterSeconds` is when it frees.
+ *   - `RECIPIENT_NOT_ALLOWED` ({@link KashValidationError}, 422): Kash cannot
+ *     send to the destination; register another.
+ *   - `WITHDRAWAL_NETWORK_DISABLED` ({@link KashValidationError}, 422):
+ *     withdrawals to the destination's network are paused.
+ *   - `WITHDRAWAL_BELOW_MINIMUM` also below 1 USDC on Solana (2 USDC through the
+ *     bridge).
  *   - `IDEMPOTENCY_REQUEST_IN_PROGRESS` ({@link KashConflictError}): an earlier
  *     request with this key is still running, typically after a timeout.
  *     NOT a refusal: retry with the SAME key to receive its answer. Never
@@ -33,12 +47,13 @@
  */
 
 import { buildPage, type Page } from '../internal/pagination.js';
-import { pollUntil } from '../internal/polling.js';
+import { pollTiming, pollUntil } from '../internal/polling.js';
 import { parseRequestBody, requireIdempotencyKey } from '../internal/request-body.js';
 import { pageLimit, transportOverrides, validateUuid } from '../internal/request-options.js';
 import {
   CreatePartnerWithdrawalBodySchema,
   CreatePartnerWithdrawalResponseSchema,
+  PartnerWithdrawalQuoteParamsSchema,
   GetPartnerWithdrawalResponseSchema,
   ListPartnerWithdrawalsResponseSchema,
   PartnerWithdrawalQuoteResponseSchema,
@@ -78,9 +93,9 @@ export type PartnerWithdrawalQuoteParams = {
 
 /** Options for {@link PartnerWithdrawalsClient.waitForCompletion}. */
 export type WaitForWithdrawalOptions = {
-  /** Total time budget across all polls. Default 600 s: a bridge to Arc can take minutes. */
+  /** Total time budget across all polls. Default 600 s: a bridge to Arc can take minutes. A value that is not a finite number of 0 or more is refused with `KashValidationError`. */
   readonly timeoutMs?: number;
-  /** Delay between polls. Default 5 s. */
+  /** Delay between polls. Default 5 s; at least 1 ms and at most 2,147,483,647 ms (the longest delay a timer honours); anything else is refused with `KashValidationError`. */
   readonly pollIntervalMs?: number;
   /** Invoked with each fetched withdrawal, for status logs. */
   readonly onStatus?: (withdrawal: PartnerWithdrawalResource) => void;
@@ -120,7 +135,7 @@ export class PartnerWithdrawalsClient {
   ): Promise<PartnerWithdrawalQuote> {
     validateUuid(accountId, 'accountId');
     const { amountAtomic } = parseRequestBody(
-      CreatePartnerWithdrawalBodySchema,
+      PartnerWithdrawalQuoteParamsSchema,
       params,
       'partnerAccounts.withdrawals.quote'
     );
@@ -135,8 +150,10 @@ export class PartnerWithdrawalsClient {
   }
 
   /**
-   * Withdraw `amountAtomic` to the account's registered destination. The
-   * answer is `202` with the withdrawal in `pending`; it completes later
+   * Withdraw `amountAtomic` to the account's registered destination, which
+   * the body may state as `destination` to confirm it (any other is refused
+   * `DESTINATION_MISMATCH`). The answer is `202` with the withdrawal in
+   * `pending`; it completes later
    * (`withdrawal.completed` or `withdrawal.failed` webhook, or poll
    * {@link get}).
    *
@@ -214,13 +231,16 @@ export class PartnerWithdrawalsClient {
   ): Promise<PartnerWithdrawalResource> {
     validateUuid(accountId, 'accountId');
     validateUuid(withdrawalId, 'withdrawalId');
+    const timing = pollTiming('partnerAccounts.withdrawals.waitForCompletion', {
+      timeoutMs: opts.timeoutMs ?? 600_000,
+      pollIntervalMs: opts.pollIntervalMs ?? 5_000,
+    });
     const inner: RequestOverrides = opts.signal === undefined ? {} : { signal: opts.signal };
     return pollUntil(
       () => this.get(accountId, withdrawalId, inner),
       (withdrawal) => TERMINAL_WITHDRAWAL_STATUSES.has(withdrawal.status),
       {
-        timeoutMs: opts.timeoutMs ?? 600_000,
-        pollIntervalMs: opts.pollIntervalMs ?? 5_000,
+        timing,
         ...(opts.onStatus === undefined ? {} : { onStatus: opts.onStatus }),
         ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       }

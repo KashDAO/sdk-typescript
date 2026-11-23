@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { KashClient } from '../../src/index.js';
+import { KashClient, KashValidationError } from '../../src/index.js';
 
 import { META } from './_test-utils.js';
 
@@ -66,5 +66,60 @@ describe('PortfolioClient', () => {
     });
     const positions = await kash.portfolio.positions();
     expect(positions).toEqual([position]);
+  });
+
+  describe('claimable', () => {
+    const MARKET = '00000000-0000-0000-0000-000000000001';
+    const ITEM = {
+      marketId: MARKET,
+      outcomeIndex: 1,
+      kind: 'resolved',
+      shares: '1817600000000000000',
+      quotedAmountAtomic: '1680305',
+      quoteStatus: 'quoted',
+      claimStatus: 'claimable',
+    };
+    const UNQUOTED = {
+      ...ITEM,
+      outcomeIndex: 2,
+      quotedAmountAtomic: null,
+      quoteStatus: 'unavailable',
+    };
+
+    function client(body: unknown) {
+      const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(body));
+      const kash = new KashClient({
+        apiKey: 'kash_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        baseUrl: 'https://api.test.local/v1',
+        fetch: fetchSpy as unknown as typeof fetch,
+        maxRetries: 0,
+      });
+      return { kash, fetchSpy };
+    }
+
+    it('reads GET /portfolio/claimable and returns the data array, an unread quote as null', async () => {
+      const { kash, fetchSpy } = client({ data: [ITEM, UNQUOTED], _meta: META });
+
+      const items = await kash.portfolio.claimable();
+
+      expect(items).toEqual([ITEM, UNQUOTED]);
+      const url = new URL(fetchSpy.mock.calls[0]![0]);
+      expect(url.pathname).toBe('/v1/portfolio/claimable');
+      expect(url.searchParams.has('marketId')).toBe(false);
+    });
+
+    it('passes the optional marketId filter', async () => {
+      const { kash, fetchSpy } = client({ data: [], _meta: META });
+
+      await kash.portfolio.claimable({ marketId: MARKET });
+
+      expect(new URL(fetchSpy.mock.calls[0]![0]).searchParams.get('marketId')).toBe(MARKET);
+    });
+
+    it('refuses a response whose quote is a number rather than a string', async () => {
+      const { kash } = client({ data: [{ ...ITEM, quotedAmountAtomic: 1680305 }], _meta: META });
+
+      await expect(kash.portfolio.claimable()).rejects.toThrow(KashValidationError);
+    });
   });
 });
